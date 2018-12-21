@@ -217,16 +217,22 @@ class VolpoKhIsothermWorkChain(WorkChain):
         self.ctx.current_p_index = 0
         self.ctx.restart_raspa_calc = None
 
-        # Manage pressures
+        # Estimate the total loading qsat and choose the pressure points
         satDens = self.inputs.raspa_molsatdens.value #(mol/l)
         poreVol = self.ctx.zeopp['output_parameters'].get_dict()['POAV_cm^3/g'] #(cm3/g = l/kg)
-        qsat = satDens * poreVol #(mol_ads/kg_frame)
-        Kh = self.ctx.raspa_widom["component_0"].get_dict()['henry_coefficient_average'] #(mol/kg/Pa)
-        dpa = self.inputs.raspa_gcmc_press_precision.value #(kg*Pa/mol)
-        dpmax = self.inputs.raspa_gcmc_press_maxstep.value #(Pa)
-        pmax = self.inputs.raspa_gcmc_press_max.value #(Pa)
-        self.ctx.pressures = choose_pressure_points(Kh, qsat, dpa, dpmax, pmax)
-        self.report("Computed Kh(mol/kg/Pa)={:.2e} POAV(cm3/g)={:.3f} Qsat(mol/kg)={:.2f}".format(Kh,poreVol,qsat))
+        self.ctx.estimated_qsat = satDens * poreVol
+        self.ctx.pressures = choose_pressure_points(
+            self.ctx.raspa_widom["component_0"].get_dict()['henry_coefficient_average'], #(mol/kg/Pa)
+            self.ctx.estimated_qsat, #(mol/kg_frame)
+            self.inputs.raspa_gcmc_press_precision.value, #(kg*Pa/mol)
+            self.inputs.raspa_gcmc_press_maxstep.value, #(Pa)
+            self.inputs.raspa_gcmc_press_max.value, #(Pa)
+            )
+        self.report("Computed Kh(mol/kg/Pa)={:.2e} POAV(cm3/g)={:.3f} Qsat(mol/kg)={:.2f}".format(
+                    self.ctx.raspa_widom["component_0"].get_dict()['henry_coefficient_average'],
+                    poreVol,
+                    self.ctx.estimated_qsat,
+                    ))
         self.report("Now evaluating the isotherm for {} pressure points".format(len(self.ctx.pressures)))
 
         # CORRECT the parameters to perform GCMC
@@ -333,6 +339,8 @@ class VolpoKhIsothermWorkChain(WorkChain):
 
         # Raspa GCMC section
         try:
+            result_dict['estimated_saturation_loading'] = self.ctx.estimated_qsat
+            result_dict['estimated_saturation_loading_units'] = "mol/kg"
             result_dict['isotherm_loading_header'] = ['Pressure(bar)', 'Loading_average(molec/UC)', 'Loading_deviation(molec/UC)']
             result_dict['isotherm_loading'] = self.ctx.isotherm_loading
             result_dict['isotherm_enthalpy_header'] = ['Pressure(bar)', 'Enthalpy_of_adsorption_average(kJ/mol)', 'Enthalpy_of_adsorption_deviation(kJ/mol)']

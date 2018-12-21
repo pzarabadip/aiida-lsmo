@@ -12,11 +12,10 @@ CifData = DataFactory('cif')
 # User settings
 last = 0 #select the Nth last result in time
 workflow1_label = '3DCOFs-600K-OptAngles'
-workflow21_label = 'isot-0_co2'
-workflow22_label = 'isot-0_n2'
-#with open('3dN.list') as f:
-#    structure_labels=f.read().splitlines()
-structure_labels = ['13180N']
+workflow21_label = 'isot-1_co2'
+workflow22_label = 'isot-1_n2'
+with open('3dN.list') as f:
+    structure_labels=f.read().splitlines()
 ############################################################ Print vol & Kh info
 ofile = open("parse_VolpoKhIsotherm.out","w+")
 for structure_label in structure_labels:
@@ -29,7 +28,10 @@ for structure_label in structure_labels:
         q.append(CifData, edge_filters={'label': 'output_structure'}, output_of='wf1', tag='cif')
         q.append(WorkCalculation, filters={'label': workflow2_label}, output_of='cif', tag='wf2')
         q.append(ParameterData, output_of='wf2')
-        res = q.all()[0][0].get_dict()
+        try:
+            res = q.all()[0][0].get_dict()
+        except:
+            break
         print("POA-vf = {:.2f}, ".format(res['POAV_Volume_fraction']),
               end="",file=ofile)
         try:
@@ -49,22 +51,28 @@ dir_out="./parse_VolpoKhIsotherm/"
 if not os.path.exists(dir_out):
     os.makedirs(dir_out)
 for structure_label in structure_labels:
-    structure_dir=dir_out+structure_label+"/"
-    if not os.path.exists(structure_dir):
-        os.makedirs(structure_dir)
     for i,workflow2_label in enumerate([workflow21_label,workflow22_label]):
         gas = ['CO_2','N_2'][i]
-        structure_dir_gas=structure_dir+gas+"/"
-        if not os.path.exists(structure_dir_gas):
-            os.makedirs(structure_dir_gas)
+
         q = QueryBuilder()
         q.append(StructureData, filters={'label': structure_label}, tag='inp_struct')
         q.append(WorkCalculation, filters={'label': workflow1_label}, output_of='inp_struct', tag='wf1')
         q.append(CifData, edge_filters={'label': 'output_structure'}, output_of='wf1', tag='cif')
         q.append(WorkCalculation, filters={'label':workflow2_label}, output_of='cif', tag='wf2')
         q.append(ParameterData, output_of='wf2')
-        res = q.all()[0][0].get_dict()
+        try:
+            res = q.all()[0][0].get_dict()
+        except:
+            break
+        #create directories and initializate file
+        structure_dir=dir_out+structure_label+"/"
+        if not os.path.exists(structure_dir):
+            os.makedirs(structure_dir)
+        structure_dir_gas=structure_dir+gas+"/"
+        if not os.path.exists(structure_dir_gas):
+            os.makedirs(structure_dir_gas)
         ofile = open(structure_dir_gas+"300.csv","w+")
+        # Print header and info
         print("pressure(Pa) loading(mol/kg) HoA(kJ/mol)",file=ofile)
         for i in range(len(res['isotherm_loading'])):
             try:
