@@ -16,8 +16,8 @@ def dict_merge_ez(dict1, dict2):
     return sumdicts
 
 # Test the codes and specify the nodes and walltime
-zeopp_code = test_and_get_code('zeopp@localhost', expected_code_type='zeopp.network')
-raspa_code = test_and_get_code('raspa@localhost', expected_code_type='raspa')
+zeopp_code = test_and_get_code('zeopp@deneb', expected_code_type='zeopp.network')
+raspa_code = test_and_get_code('raspa@deneb', expected_code_type='raspa')
 
 zeopp_options = {
     "resources": {
@@ -44,7 +44,7 @@ raspa_params_general = {
         "GeneralSettings":
         {
         "NumberOfInitializationCycles"     : 1000, # Widom will use 0
-        "NumberOfCycles"                   : 5000, # Widom will use 10x
+        "NumberOfCycles"                   : 10000, # Widom will use 10x
         "Forcefield"                       : "LSMO_UFF-TraPPE",
         "CutOff"                           : 12.0,
         "ExternalTemperature"              : 300.0,
@@ -70,9 +70,9 @@ raspa_minKh_n2 = Float(0) #(mol/kg/Pa) Use GCMC if Kh>minKh
 raspa_molsatdens_n2 = Float(28.3) #(mol/l) Density of the molecule @ saturation
 
 # Take the structures from a RobustGeoOptDdec calculation ans submit
-#with open('3dN.list') as f:
-#    ids=f.read().splitlines()
-ids = ['13180N']
+with open('3dN.list') as f:
+    ids=f.read().splitlines()
+#ids = ['09000N']
 prevWorkflow = '3DCOFs-600K-OptAngles'
 for id in ids:
     q = QueryBuilder()
@@ -96,7 +96,7 @@ for id in ids:
         _raspa_usecharges=True,
         raspa_minKh=raspa_minKh_co2,
         raspa_molsatdens=raspa_molsatdens_co2,
-        _label='isot-0_co2',
+        _label='isot-1_co2',
         )
     # Run for N2, using UFF-TraPPE force field
     submit(VolpoKhIsothermWorkChain,
@@ -111,5 +111,5 @@ for id in ids:
         _raspa_usecharges=True,
         raspa_minKh=raspa_minKh_n2,
         raspa_molsatdens=raspa_molsatdens_n2,
-        _label='isot-0_n2',
+        _label='isot-1_n2',
         )

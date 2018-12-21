@@ -1,6 +1,6 @@
 from aiida.orm import CalculationFactory, DataFactory
 from aiida.orm.code import Code
-from aiida.orm.data.base import Float
+from aiida.orm.data.base import Float, Int
 from aiida.work import workfunction as wf
 from aiida.work.run import submit
 from aiida.work.workchain import WorkChain, ToContext, Outputs, while_, if_
@@ -30,7 +30,7 @@ def choose_pressure_points(Kh, qsat, dpa, dpmax, pmax):
     :param qsat: saturations loading (mol/kg)
     :param dpa: precision of the sampling at low pressure (0.1 is a good one)
     :param dpmax: maximum distance between two pressure points (Pa)
-    :param pmax: max pressure to sample
+    :param pmax: max pressure to sample (Pa)
     """
     R = 8.314/1000 #(kJ/mol/K)
     b = Kh/qsat #(1/Pa)
@@ -57,19 +57,28 @@ class VolpoKhIsothermWorkChain(WorkChain):
         # structure
         spec.input('structure', valid_type=CifData)
 
-        # zeopp
+        # zeopp main
         spec.input('zeopp_code', valid_type=Code)
         spec.input("_zeopp_options", valid_type=dict, default=None, required=False)
         spec.input("zeopp_probe_radius", valid_type=Float)
         spec.input("zeopp_atomic_radii", valid_type=SinglefileData, default=None, required=False)
 
-        # raspa
+        # raspa main
         spec.input("raspa_code", valid_type=Code)
         spec.input("raspa_parameters", valid_type=ParameterData)
         spec.input("_raspa_options", valid_type=dict, default=None, required=False)
         spec.input("_raspa_usecharges", valid_type=bool, default=False, required=False)
         spec.input("raspa_minKh", valid_type=Float, default=Float(1e-10), required=False)
         spec.input("raspa_molsatdens", valid_type=Float) #density of the liquid phase of the molecule in mol/m3
+
+        # advanced settings (TODO: add and discuss)
+        spec.input("zeopp_block_samples_A3", valid_type=Int, default=Int(100), required=False) #100 samples / Ang^3: accurate for all the structures
+        spec.input("zeopp_volpo_samples_UC", valid_type=Int, default=Int(100000), required=False) #100k samples, may need more for structures bigger than 30x30x30
+        spec.input("raspa_verbosity", valid_type=Int, default=Int(10), required=False)
+        spec.input("raspa_widom_cycle_mult", valid_type=Int, default=Int(10), required=False)
+        spec.input("raspa_gcmc_press_precision", valid_type=Float, default=Float(0.1), required=False)
+        spec.input("raspa_gcmc_press_maxstep", valid_type=Float, default=Float(5e5), required=False)
+        spec.input("raspa_gcmc_press_max", valid_type=Float, default=Float(30e5), required=False)
 
         # workflow
         spec.outline(
@@ -95,11 +104,11 @@ class VolpoKhIsothermWorkChain(WorkChain):
         """Main function that performs zeo++ block and VOLPO calculations."""
         params = {
                 'ha': True,
-                #100 samples / Ang^3: accurate for all the structures
-                'block': [self.inputs.zeopp_probe_radius.value, 100],
-                #100k samples, may need more for structures bigger than 30x30x30
+                'block': [self.inputs.zeopp_probe_radius.value,
+                          self.inputs.zeopp_block_samples_A3.value],
                 'volpo': [self.inputs.zeopp_probe_radius.value,
-                          self.inputs.zeopp_probe_radius.value, 100000] #DEBUG: bottleneck to lower for debug
+                          self.inputs.zeopp_probe_radius.value,
+                          self.inputs.zeopp_volpo_samples_UC.value,]
         }
 
         inputs = {
@@ -152,8 +161,8 @@ class VolpoKhIsothermWorkChain(WorkChain):
         # CORRECT the settings to have only Widom insertion
         self.ctx.raspa_parameters["GeneralSettings"]["SimulationType"] = "MonteCarlo"
         self.ctx.raspa_parameters["GeneralSettings"]["NumberOfInitializationCycles"] = 0
-        self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"] = 10*self.inputs.raspa_parameters.get_dict()["GeneralSettings"]["NumberOfCycles"]
-        self.ctx.raspa_parameters["GeneralSettings"]["PrintPropertiesEvery"] = self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"]/100
+        self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"] = self.inputs.raspa_widom_cycle_mult.value * self.inputs.raspa_parameters.get_dict()["GeneralSettings"]["NumberOfCycles"]
+        self.ctx.raspa_parameters["GeneralSettings"]["PrintPropertiesEvery"] = int(self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"] / self.inputs.raspa_verbosity.value)
         self.ctx.raspa_parameters["GeneralSettings"]["PrintEvery"] = int(1e6) #never
         self.ctx.raspa_parameters["Component"][0]["WidomProbability"] = 1.0
         return
@@ -209,22 +218,22 @@ class VolpoKhIsothermWorkChain(WorkChain):
         self.ctx.restart_raspa_calc = None
 
         # Manage pressures
-        satDens = self.inputs.raspa_molsatdens.value #mol/l
+        satDens = self.inputs.raspa_molsatdens.value #(mol/l)
         poreVol = self.ctx.zeopp['output_parameters'].get_dict()['POAV_cm^3/g'] #(cm3/g = l/kg)
         qsat = satDens * poreVol #(mol_ads/kg_frame)
-        Kh = self.ctx.raspa_widom["component_0"].get_dict()['henry_coefficient_average'] #()
-        dpa = 0.1
-        dpmax = 5e5 #(Pa)
-        pmax = 60e5 #(Pa)
+        Kh = self.ctx.raspa_widom["component_0"].get_dict()['henry_coefficient_average'] #(mol/kg/Pa)
+        dpa = self.inputs.raspa_gcmc_press_precision.value #(kg*Pa/mol)
+        dpmax = self.inputs.raspa_gcmc_press_maxstep.value #(Pa)
+        pmax = self.inputs.raspa_gcmc_press_max.value #(Pa)
         self.ctx.pressures = choose_pressure_points(Kh, qsat, dpa, dpmax, pmax)
-        self.report("Computed Kh={:.2e}mol/kg/Pa, POAV={:.3f}cm3/g, Qsat={:.2f}".format(Kh,poreVol,qsat))
-        self.report("Now evaluating {} pressure points".format(len(self.ctx.pressures)))
+        self.report("Computed Kh(mol/kg/Pa)={:.2e} POAV(cm3/g)={:.3f} Qsat(mol/kg)={:.2f}".format(Kh,poreVol,qsat))
+        self.report("Now evaluating the isotherm for {} pressure points".format(len(self.ctx.pressures)))
 
         # CORRECT the parameters to perform GCMC
         self.ctx.raspa_parameters["GeneralSettings"]["NumberOfInitializationCycles"] = self.inputs.raspa_parameters.get_dict()["GeneralSettings"]["NumberOfInitializationCycles"]
         self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"] = self.inputs.raspa_parameters.get_dict()["GeneralSettings"]["NumberOfCycles"]
         self.ctx.raspa_parameters["GeneralSettings"]["PrintPropertiesEvery"] = int(1e6) #never
-        self.ctx.raspa_parameters["GeneralSettings"]["PrintEvery"] = int(self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"]/100)
+        self.ctx.raspa_parameters["GeneralSettings"]["PrintEvery"] = int(self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"]/self.inputs.raspa_verbosity.value)
         self.ctx.raspa_parameters["Component"][0]["WidomProbability"] = 0.0
         self.ctx.raspa_parameters["Component"][0]["TranslationProbability"] = 1.0
         self.ctx.raspa_parameters["Component"][0]["RotationProbability"] = 1.0
@@ -263,7 +272,7 @@ class VolpoKhIsothermWorkChain(WorkChain):
 
         # Create the calculation process and launch it
         running = submit(RaspaConvergeWorkChain, **inputs)
-        self.report("pk: {} | Running Raspa GCMC at p={}bar ({} of {})".format(running.pid, pressure/1e5, self.ctx.current_p_index+1, len(self.ctx.pressures)))
+        self.report("pk: {} | Running Raspa GCMC at p(bar)={:.3f} ({} of {})".format(running.pid, pressure/1e5, self.ctx.current_p_index+1, len(self.ctx.pressures)))
         return ToContext(raspa_gcmc=Outputs(running))
 
 
@@ -274,17 +283,19 @@ class VolpoKhIsothermWorkChain(WorkChain):
 
         # Initializate variables
         if self.ctx.current_p_index == 0:
-            self.ctx.isotherm_loading_avg_dev = []
-            self.ctx.isotherm_enthalpy_avg_dev = []
+            self.ctx.isotherm_loading = []
+            self.ctx.isotherm_enthalpy = []
 
         # Store results
         pressure = self.ctx.raspa_parameters['GeneralSettings']['ExternalPressure']/1e5
-        loading_average = self.ctx.raspa_gcmc["component_0"].get_dict()['loading_absolute_average']
-        loading_dev = self.ctx.raspa_gcmc["component_0"].get_dict()['loading_absolute_dev']
-        enthalpy_of_adsorption = self.ctx.raspa_gcmc["output_parameters"].get_dict()['enthalpy_of_adsorption_average']
-        enthalpy_of_adsorption_dev = self.ctx.raspa_gcmc["output_parameters"].get_dict()['enthalpy_of_adsorption_dev']
-        self.ctx.isotherm_loading_avg_dev.append((pressure, loading_average,loading_dev))
-        self.ctx.isotherm_enthalpy_avg_dev.append((pressure, enthalpy_of_adsorption, enthalpy_of_adsorption_dev))
+        conv1 = self.ctx.raspa_gcmc["component_0"].get_dict()["conversion_factor_molec_uc_to_mol_kg"]
+        loading_average = conv1 * self.ctx.raspa_gcmc["component_0"].get_dict()['loading_absolute_average']
+        loading_dev = conv1 * self.ctx.raspa_gcmc["component_0"].get_dict()['loading_absolute_dev']
+        conv2 = 1/120.273 # K to kJ/mol
+        enthalpy_of_adsorption = conv2 * self.ctx.raspa_gcmc["output_parameters"].get_dict()['enthalpy_of_adsorption_average']
+        enthalpy_of_adsorption_dev = conv2 * self.ctx.raspa_gcmc["output_parameters"].get_dict()['enthalpy_of_adsorption_dev']
+        self.ctx.isotherm_loading.append((pressure, loading_average,loading_dev))
+        self.ctx.isotherm_enthalpy.append((pressure, enthalpy_of_adsorption, enthalpy_of_adsorption_dev))
 
         # Update counter and parent folder for restart
         self.ctx.current_p_index += 1
@@ -297,6 +308,8 @@ class VolpoKhIsothermWorkChain(WorkChain):
         result_dict = {}
 
         # Zeopp section
+        result_dict['Density'] = self.ctx.zeopp['output_parameters'].get_dict()['Density']
+        result_dict['Density_unit'] = "g/cm^3"
         result_dict['POAV_Volume_fraction'] = self.ctx.zeopp['output_parameters'].get_dict()['POAV_Volume_fraction']
         result_dict['PONAV_Volume_fraction'] = self.ctx.zeopp['output_parameters'].get_dict()['PONAV_Volume_fraction']
         result_dict['POAV_cm^3/g'] = self.ctx.zeopp['output_parameters'].get_dict()['POAV_cm^3/g']
@@ -307,6 +320,8 @@ class VolpoKhIsothermWorkChain(WorkChain):
 
         # Raspa Widom section
         try:
+            result_dict['temperature'] = self.ctx.raspa_parameters["GeneralSettings"]["ExternalTemperature"]
+            result_dict['temperature_unit'] = "K"
             result_dict['henry_coefficient_average'] = self.ctx.raspa_widom["component_0"].get_dict()['henry_coefficient_average'] #(mol/kg/Pa)
             result_dict['henry_coefficient_dev'] = self.ctx.raspa_widom["component_0"].get_dict()['henry_coefficient_dev']
             result_dict['henry_coefficient_units'] = self.ctx.raspa_widom["component_0"].get_dict()['henry_coefficient_units']
@@ -317,13 +332,16 @@ class VolpoKhIsothermWorkChain(WorkChain):
             pass
 
         # Raspa GCMC section
-        result_dict['isotherm_loading_header'] = ['Pressure(bar)', 'Loading_average(molec/UC)', 'Loading_deviation(molec/UC)']
-        result_dict['isotherm_loading_avg_dev'] = self.ctx.isotherm_loading_avg_dev
-        result_dict['isotherm_enthalpy_header'] = ['Pressure(bar)', 'Enthalpy_of_adsorption_average(kJ/mol)', 'Enthalpy_of_adsorption_deviation(kJ/mol)']
-        result_dict['isotherm_enthalpy_avg_dev'] = self.ctx.isotherm_enthalpy_avg_dev
-        result_dict['conversion_factor_molec_uc_to_cm3stp_cm3'] = self.ctx.raspa_gcmc["component_0"].get_dict()['conversion_factor_molec_uc_to_cm3stp_cm3']
-        result_dict['conversion_factor_molec_uc_to_gr_gr'] = self.ctx.raspa_gcmc["component_0"].get_dict()['conversion_factor_molec_uc_to_gr_gr']
-        result_dict['conversion_factor_molec_uc_to_mol_kg'] = self.ctx.raspa_gcmc["component_0"].get_dict()['conversion_factor_molec_uc_to_mol_kg']
+        try:
+            result_dict['isotherm_loading_header'] = ['Pressure(bar)', 'Loading_average(molec/UC)', 'Loading_deviation(molec/UC)']
+            result_dict['isotherm_loading'] = self.ctx.isotherm_loading
+            result_dict['isotherm_enthalpy_header'] = ['Pressure(bar)', 'Enthalpy_of_adsorption_average(kJ/mol)', 'Enthalpy_of_adsorption_deviation(kJ/mol)']
+            result_dict['isotherm_enthalpy'] = self.ctx.isotherm_enthalpy
+            result_dict['conversion_factor_molec_uc_to_cm3stp_cm3'] = self.ctx.raspa_gcmc["component_0"].get_dict()['conversion_factor_molec_uc_to_cm3stp_cm3']
+            result_dict['conversion_factor_molec_uc_to_gr_gr'] = self.ctx.raspa_gcmc["component_0"].get_dict()['conversion_factor_molec_uc_to_gr_gr']
+            result_dict['conversion_factor_molec_uc_to_mol_kg'] = self.ctx.raspa_gcmc["component_0"].get_dict()['conversion_factor_molec_uc_to_mol_kg']
+        except AttributeError:
+            pass
 
         self.out("results", ParameterData(dict=result_dict).store())
         self.out('blocking_spheres', self.ctx.zeopp['block'])

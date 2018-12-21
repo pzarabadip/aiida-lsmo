@@ -1,7 +1,7 @@
 import os
 from aiida.common.example_helpers import test_and_get_code
 from aiida.orm import DataFactory
-from aiida.orm.data.base import Float
+from aiida.orm.data.base import Float, Int
 from aiida.orm.calculation.work import WorkCalculation
 from aiida.work.run import submit
 from aiida_lsmo_workflows.volpo_Kh_isotherm import VolpoKhIsothermWorkChain
@@ -42,11 +42,11 @@ zeopp_atomic_radii_file = SinglefileData(file=os.path.abspath("./UFF.rad")) # Ra
 raspa_params_general = {
         "GeneralSettings":
         {
-        "NumberOfInitializationCycles"     : 1000, # Widom will use 0
-        "NumberOfCycles"                   : 1000, # Widom will use 10x
+        "NumberOfInitializationCycles"     : 100, # Widom will use 0
+        "NumberOfCycles"                   : 100, # Widom will use 10x
         "Forcefield"                       : "LSMO_UFF-TraPPE",
         "CutOff"                           : 12.0,
-        "ExternalTemperature"              : 273.0,
+        "ExternalTemperature"              : 300.0,
         },
 }
 raspa_params_co2 = {
@@ -77,4 +77,8 @@ submit(VolpoKhIsothermWorkChain,
     raspa_minKh=raspa_minKh_co2,
     raspa_molsatdens=raspa_molsatdens_co2,
     _label='VolpoKhIsotherm-test',
+    #lowered settings for testing
+    zeopp_volpo_samples_UC=Int(10000),
+    raspa_gcmc_press_maxstep=Float(5e5),
+    raspa_gcmc_press_max=Float(20e5),
     )

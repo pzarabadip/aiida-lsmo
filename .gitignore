@@ -108,3 +108,4 @@ venv.bak/
 #cof_test/
 *.out
 *.png
+*.csv
