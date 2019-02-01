@@ -66,12 +66,15 @@ def plot_steps(file_out, structure):
 
 # User settings
 last = 0 #select the Nth last result in time
-workflow_label = '2DCOFs-600K-OptAngles'
-with open('2dN.list') as f:
+workflow_label = '2DCOFs-600K-OptAngles2'
+with open('2dN1.list') as f:
     structure_labels=f.read().splitlines()
 # General settings
 stage_name = ['Stage0_Energy','Stage1_CellOpt','Stage2_MD','Stage3_GeoOpt','Stage4_CellOpt']
 dir_out="./parse_Cp2kGeoOpt/"
+if not os.path.exists(dir_out):
+    os.makedirs(dir_out)
+dir_out="./parse_Cp2kGeoOpt/"+workflow_label+"/"
 if not os.path.exists(dir_out):
     os.makedirs(dir_out)
 # Search for the path for the 4 steps: energy, md, geo_opt, cell_opt. Store them.
