@@ -13,7 +13,7 @@ cp2k_code = test_and_get_code('cp2k-5.1@fidis', expected_code_type='cp2k')
 ddec_code = test_and_get_code('ddec@fidis', expected_code_type='ddec')
 cp2k_options = {
     "resources": {
-        "num_machines": 2,
+        "num_machines": 3,
     },
     "max_wallclock_seconds": 50 * 60 * 60,
     }
@@ -38,6 +38,37 @@ params_dict = {
 }
 '''
 params_dict = {
+    'FORCE_EVAL': {
+        'DFT': {
+            'SCF': {
+                'EPS_SCF': 1.0E-6,
+                'MAX_SCF': 500,
+                'MAX_ITER_LUMO': 10000,
+                'ADDED_MOS': 1000,
+                'SMEAR': {
+                    '_': 'ON',
+                    'METHOD': 'FERMI_DIRAC',
+                    'ELECTRONIC_TEMPERATURE': '[K] 300',
+                    },
+                'DIAGONALIZATION': {
+                    '_': True,
+                    'ALGORITHM': 'STANDARD'
+                    },
+                'OT': {
+                    '_': False,
+                    },
+                'OUTER_SCF': {
+                    '_': False,
+                    },
+                'MIXING': {
+                    '_': True,
+                    'METHOD': 'BROYDEN_MIXING',
+                    'ALPHA': 0.4,
+                    'NBROYDEN': 8,
+                    },
+                },
+            },
+        },
     'MOTION': {
         'MD': {
             'ENSEMBLE': 'NPT_F',                    #main options: NVT, NPT_F
@@ -69,8 +100,9 @@ params_dict = {
 cp2k_parameters = ParameterData(dict=params_dict)
 
 # Using lists to specify the IDs
-with open('list-1013.list') as f:
+with open('list-smearing.list') as f:
     ids=f.read().splitlines()
+#ids=['10010N2']
 all_structures = [ "/home/daniele/Documents/CoRE-COFs/cifs/{}.cif".format(x) for x in ids]
 # Submit the calculations
 for s in all_structures:
@@ -86,7 +118,7 @@ for s in all_structures:
         _cp2k_options=cp2k_options,
         ddec_code=ddec_code,
         _ddec_options=ddec_options,
-        _label='test1-0',
+        _label='test1-smearing',
         _guess_multiplicity=True,
         min_cell_size=Float(10.0)
         )

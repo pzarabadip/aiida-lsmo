@@ -67,8 +67,9 @@ def plot_steps(file_out, structure):
 # User settings
 last = 0 #select the Nth last result in time
 workflow_label = 'test1-0'
-with open('list-18.list') as f:
+with open('list-321.list') as f:
     structure_labels=f.read().splitlines()
+# structure_labels=['13182N3','14000N2'] #test
 # General settings
 stage_name = ['Stage0_Energy','Stage1_CellOpt','Stage2_MD','Stage3_GeoOpt','Stage4_CellOpt']
 dir_out="./parse_Cp2kGeoOpt/"
@@ -77,46 +78,59 @@ if not os.path.exists(dir_out):
 dir_out="./parse_Cp2kGeoOpt/"+workflow_label+"/"
 if not os.path.exists(dir_out):
     os.makedirs(dir_out)
-# Search for the path for the 4 steps: energy, md, geo_opt, cell_opt. Store them.
+
 for structure in structure_labels:
     stage_localpath = ["INCOMPLETE"] * 5
     stage_pk = ["INCOMPLETE"] * 5
-    pkfile = open(dir_out + structure + "_" + workflow_label + "_pk.out","w+")
-    for istage in range(5):
-        if istage == 0 or stage_localpath[istage-1] != "INCOMPLETE":
-            qb = QueryBuilder()
-            qb.append(StructureData, filters={'label': {'==':structure}}, tag='structure')
-            qb.append(WorkCalculation, filters={'label':{'==':workflow_label}}, output_of='structure', tag='workflow')
-            qb.append(WorkCalculation, filters={'label':{'==':'Cp2kRobustGeoOptWorkChain'}}, output_of='workflow', tag='robustgeoopt')
-            if istage == 0:
-                qb.append(WorkCalculation, filters={'label':{'==':stage_name[0]}}, output_of='robustgeoopt', tag='dftbase')
-            else:
-                qb.append(WorkCalculation, filters={'label':{'==':stage_name[istage]}}, output_of='robustgeoopt', tag='stage')
-                qb.append(WorkCalculation, filters={'label':{'==':'Cp2kDftBaseWorkChain'}}, output_of='stage', tag='dftbase')
-            qb.append(JobCalculation,output_of='dftbase',tag='calc')
-            qb.order_by({WorkCalculation:{'ctime':'desc'}})
-            try:
-                stage_localpath[istage] =  qb.all()[last][0].out.retrieved.get_abs_path()+'/path/aiida.out'
-                stage_pk[istage] = str(qb.all()[last][0].pk)
-            except:
-                pass
-        # Print file with pk and local directory
-        print('%s\t%s\t%s' %(stage_name[istage],stage_pk[istage],stage_localpath[istage]), file=pkfile)
 
-    pkfile.close()
-    # Print on screen the state of the calculation
-    completed_stage = 4 - stage_localpath.count("INCOMPLETE")
-    if completed_stage == -1:
-        mex = "None"
+    # get first the pk of the main workflow Cp2kGeoOptDdecWorkChain
+    qb = QueryBuilder()
+    qb.append(StructureData, filters={'label': {'==':structure}}, tag='structure')
+    qb.append(WorkCalculation, filters={'label':{'==':workflow_label}}, output_of='structure', tag='workflow')
+    if len(qb.all())==0:
+        pk_work=0
+        mex = 'NEVER_STARTED'
     else:
-        mex = stage_name[completed_stage]
-    print('%s\tCompleted: %s' %(structure,mex))
+        pk_work=str(qb.all()[last][0].pk)
+        pkfile = open(dir_out + structure + "_" + workflow_label + "_pk.out","w+")
+        # Search for the path for the 5 steps: energy, cell_opt, md, geo_opt, cell_opt. Store them.
+        for istage in range(5):
+            if istage == 0 or stage_localpath[istage-1] != "INCOMPLETE":
+                qb = QueryBuilder()
+                qb.append(StructureData, filters={'label': {'==':structure}}, tag='structure')
+                qb.append(WorkCalculation, filters={'label':{'==':workflow_label}}, output_of='structure', tag='workflow')
+                qb.append(WorkCalculation, filters={'label':{'==':'Cp2kRobustGeoOptWorkChain'}}, output_of='workflow', tag='robustgeoopt')
+                if istage == 0:
+                    qb.append(WorkCalculation, filters={'label':{'==':stage_name[0]}}, output_of='robustgeoopt', tag='dftbase')
+                else:
+                    qb.append(WorkCalculation, filters={'label':{'==':stage_name[istage]}}, output_of='robustgeoopt', tag='stage')
+                    qb.append(WorkCalculation, filters={'label':{'==':'Cp2kDftBaseWorkChain'}}, output_of='stage', tag='dftbase')
+                qb.append(JobCalculation,output_of='dftbase',tag='calc')
+                qb.order_by({WorkCalculation:{'ctime':'desc'}})
+                try:
+                    stage_localpath[istage] =  qb.all()[last][0].out.retrieved.get_abs_path()+'/path/aiida.out'
+                    stage_pk[istage] = str(qb.all()[last][0].pk)
+                except:
+                    pass
+            # Print file with pk and local directory
+            print('%s\t%s\t%s' %(stage_name[istage],stage_pk[istage],stage_localpath[istage]), file=pkfile)
+        pkfile.close()
+        # Print on screen the state of the calculation
+        completed_stage = 4 - stage_localpath.count("INCOMPLETE")
+        if completed_stage == -1:
+            mex = "None"
+        else:
+            mex = stage_name[completed_stage]
+            file_out = dir_out + structure + "_" + workflow_label + "_steps.out"
+            with open(file_out, 'w+') as fout:
+                with redirect_stdout(fout):
+                    print_header()
+                    for i in range(completed_stage+1):
+                        try:
+                            print_steps(stage_localpath[i])
+                        except:
+                            mex = "WARNING: Something weird happened reading the steps in cp2k.out"
+            if completed_stage>0: #plot_steps crashing with only energy value
+                plot_steps(file_out, structure)
 
-    file_out = dir_out + structure + "_" + workflow_label + "_steps.out"
-    with open(file_out, 'w+') as fout:
-        with redirect_stdout(fout):
-            print_header()
-            for i in range(completed_stage+1):
-                print_steps(stage_localpath[i])
-    if completed_stage>0: # at least Stage1 completed
-        plot_steps(file_out, structure)
+    print('%s\tpk: %s\tCompleted: %s' %(structure,pk_work,mex))

@@ -20,6 +20,7 @@ def redirect_stdout(target):
 
 # User settings
 last = 0 #select the Nth last result in time
+#workflow_label = 'directcellopt'
 workflow_label = 'directcellopt_randomized'
 with open('list-directcellopt.list') as f:
     structure_labels=f.read().splitlines()

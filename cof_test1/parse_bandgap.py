@@ -37,17 +37,19 @@ for structure in structure_labels:
             path =  qb.all()[last][0].out.retrieved.get_abs_path()+'/path/aiida.out'
         except:
             path='none'
+
+        homo_alpha='x.xxxxxx'
+        homo_beta='x.xxxxxx'
         # Print file with pk and local directory
-        print('%s\t%s' %(structure, ''), end='')
-        try:
+        if not path=='none':
             file = open(path, "r")
+            first=True
             for line in file:
                 if re.search('HOMO', line):
-                    print(' %s' %line.split()[6],end='')
-                if re.search('NOT', line):
-                    print(line.strip())
+                    if first:
+                        homo_alpha=line.split()[6]
+                        first=False
+                    else:
+                        homo_beta=line.split()[6]
             file.close()
-        except:
-            pass
-        print('')
-        print(path)
+        print('%s %9s %9s %s'%(structure,homo_alpha,homo_beta,path))
