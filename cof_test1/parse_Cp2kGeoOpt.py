@@ -66,7 +66,7 @@ def plot_steps(file_out, structure):
 
 # User settings
 last = 0 #select the Nth last result in time
-workflow_label = 'test1-0'
+workflow_label = 'test1-smearing'
 with open('list-321.list') as f:
     structure_labels=f.read().splitlines()
 # structure_labels=['13182N3','14000N2'] #test
