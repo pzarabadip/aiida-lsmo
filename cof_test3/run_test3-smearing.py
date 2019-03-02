@@ -17,7 +17,7 @@ ddec_code = test_and_get_code('ddec@daint-s888', expected_code_type='ddec')
 
 cp2k_options = {
     "resources": {
-        "num_machines": 3,
+        "num_machines": 6,
     },
     "max_wallclock_seconds": 24 * 60 * 60,
     }
@@ -35,8 +35,29 @@ params_dict = {
         'DFT': {
             'SCF': {
                 'EPS_SCF': 1.0E-7,
+                'MAX_SCF': 500,
+                'MAX_ITER_LUMO': 10000,
+                'ADDED_MOS': 1000,
+                'SMEAR': {
+                    '_': 'ON',
+                    'METHOD': 'FERMI_DIRAC',
+                    'ELECTRONIC_TEMPERATURE': '[K] 300',
+                    },
+                'DIAGONALIZATION': {
+                    '_': True,
+                    'ALGORITHM': 'STANDARD'
+                    },
+                'OT': {
+                    '_': False,
+                    },
                 'OUTER_SCF': {
-                    'EPS_SCF': 1.0E-7,
+                    '_': False,
+                    },
+                'MIXING': {
+                    '_': True,
+                    'METHOD': 'BROYDEN_MIXING',
+                    'ALPHA': 0.4,
+                    'NBROYDEN': 8,
                     },
                 },
             },
@@ -72,10 +93,10 @@ ddec_parameters = ParameterData(dict=params_dict)
 
 
 # Using lists to specify the IDs and get the output cif from test2
-with open('../cof_test2/list-OT.list') as f:
+with open('../cof_test2/list-smearing.list') as f:
     ids=f.read().splitlines()
-ids=ids[100:150]
-prevwf_label = 'test2-0'
+ids=ids[0:20]
+prevwf_label = 'test2-smearing'
 for id in ids:
     q = QueryBuilder()
     q.append(StructureData, filters={'label': id}, tag='inp_struct')
@@ -100,7 +121,7 @@ for id in ids:
             ddec_code=ddec_code,
             ddec_parameters=ddec_parameters,
             _ddec_options=ddec_options,
-            _label='test3-OT',
+            _label='test3-smearing',
             _guess_multiplicity=True,
             min_cell_size=Float(5.0)
             )

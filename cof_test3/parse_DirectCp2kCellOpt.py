@@ -36,19 +36,7 @@ def get_bandgap(stepsfile):
                 bg[1]=float(line.split()[6])
     return bg
 
-def get_startindex(l):
-    '''Take a list (of steps), and decide starting indexes and final number of steps.'''
-    startindex=[]
-    for i in range(len(l)):
-        if i==0:
-            startindex.append(0)
-        else:
-            if l[i]<=l[i-1]:
-                startindex.append(i)
-    startindex.append(len(l))
-    return startindex
-
-def cellopt_check(stepsfile):
+def directcellopt_check(stepsfile):
     '''Given the _steps.out file, evaluates the geometry convergence'''
     data = pd.read_csv(stepsfile,sep=' ')
     if data['#step'].iloc[-1]==1000:
@@ -65,7 +53,9 @@ def cellopt_check(stepsfile):
         if ediff>ethr:
             mex = 'energy[-1]_>_min(energy)+{0}Ha_ediff={1:.3f}Ha'.format(ethr,ediff)
         else:
-            mex = 'EVERYTHING_FINE'
+            diff=data['energy(Ha)'].iloc[-1]-data['energy(Ha)'].iloc[0]
+            steps=data['#step'].iloc[-1]
+            mex = 'Ediff={:.3f}Ha_Steps={:d}'.format(diff,steps)
     return mex
 
 def plot_steps(stepsfile, structure):
@@ -90,20 +80,12 @@ def plot_steps(stepsfile, structure):
     max_energy_shifted = max_energy-min_energy
 
     fig, ax = plt.subplots(figsize=[8, 4.5])
-    ax.set(title='Robust cell optimization of: '+ structure,
+    ax.set(title='Final cell optimization of: '+ structure,
            xlabel='Steps',
            ylabel='Energy (Hartree)',
            ylim=[-0.01*max_energy_shifted, +1.01*max_energy_shifted],
            )
     ax.yaxis.set_major_formatter(matplotlib.ticker.StrMethodFormatter('{x:,.3f}'))
-    #make coloured background
-    startindex=get_startindex(steps)
-    if len(startindex) > 2: #Print only Stage1_CellOpt
-        ax.axvspan(startindex[1], startindex[2]-1, ymin=0, ymax=1, color='red', alpha=0.2)
-    if len(startindex) > 3: #Print also Stage2_MD
-        ax.axvspan(startindex[2], startindex[3]-1, ymin=0, ymax=1, color='orange', alpha=0.2)
-    if len(startindex) > 4: #Print also Stage3_CellOpt
-        ax.axvspan(startindex[3], startindex[4]-1, ymin=0, ymax=1, color='green', alpha=0.2)
     #print energy profile
     ax.plot(energy_shifted,color='blue',marker='o',markersize=3,linewidth=1)
     ax.grid()
@@ -114,68 +96,84 @@ def plot_steps(stepsfile, structure):
 
 # User settings
 last = 0 #select the Nth last result in time
-workflow_label = 'test3-daint'
-prevWorkflow = 'test2-0'
-with open('../cof_test2/list-OT.list') as f:
-    structure_labels=f.read().splitlines()
-#structure_labels=['12020N2','12060N2','12061N2','12062N2'] #test
-#structure_labels=['18121N3']
-#structure_labels=['11010N2','18081N2']
-# General settings
-dir_out="./parse_Cp2kCellOpt/"
-if not os.path.exists(dir_out):
-    os.makedirs(dir_out)
-dir_out="./parse_Cp2kCellOpt/"+workflow_label+"/"
-if not os.path.exists(dir_out):
-    os.makedirs(dir_out)
-# Print header on screen
-print('Structure  pk_Cp2kCellOptDdecWorkChain  Completed       min(BandGap)  CellOpt_check')
-for structure in structure_labels:
-    stage_localpath = ["INCOMPLETE"] * 4
-    stage_pk = ["INCOMPLETE"] * 4
-    ''''
-    minbg = np.inf
-    mex = 'NEVER_STARTED'
-    mexcheck='never_started'
-    if len(qb.all())==0:
-    q = QueryBuilder()'''
-    qb = QueryBuilder()
-    qb.append(StructureData, filters={'label': structure}, tag='inp_struct')
-    qb.append(WorkCalculation, filters={'label':prevWorkflow},output_of='inp_struct', tag='wf')
-    qb.append(CifData, edge_filters={'label': 'output_structure'},output_of='wf')
-    qb.append(WorkCalculation, filters={'label':{'==':workflow_label}}, output_of='wf', tag='wf2')
-    qb.append(WorkCalculation, filters={'label':{'==':'Cp2kRobustCellOptWorkChain'}}, output_of='workflow', tag='robustcellopt')
-    qb.append(WorkCalculation, filters={'label':{'==':'Cp2kDftBaseWorkChain'}}, output_of='robustcellopt', tag='dftbase')
-    qb.append(JobCalculation,output_of='dftbase',tag='calc')
-    qb.order_by({WorkCalculation:{'ctime':'desc'}})
-        try:
-                    cellopt_localpath =  qb.all()[last][0].out.retrieved.get_abs_path()+'/path/aiida.out'
-                    cellopt_pk = str(qb.all()[last][0].pk)
-        except:
+for calc in ['ot','smearing']:
+    if calc=='ot':
+        workflow_label = 'test3-OT'
+        prevWorkflow = 'test2-0'
+        with open('../cof_test2/list-OT.list') as f:
+            structure_labels=f.read().splitlines()
+        structure_labels=structure_labels[140:]
+    elif calc=='smearing':
+        workflow_label = 'test3-smearing'
+        prevWorkflow = 'test2-smearing'
+        with open('../cof_test2/list-smearing.list') as f:
+            structure_labels=f.read().splitlines()
+
+    # General settings
+    dir_out="./parse_DirectCp2kCellOpt/"
+    if not os.path.exists(dir_out):
+        os.makedirs(dir_out)
+    dir_out="./parse_DirectCp2kCellOpt/"+workflow_label+"/"
+    if not os.path.exists(dir_out):
+        os.makedirs(dir_out)
+    # Print header on screen
+    print('{:<9s} {:<12s} {:<10s} {:<8s} {:<7s} {:<30s} {:<10s} {:s}'.format('Structure','pk_WorkChain','pk_Cellopt','BG-alpha','BG-beta','CellOpt_check','pk_CifDDEC','dir_cellopt'))
+    for structure in structure_labels:
+        # Clear variables
+        localpath_CellOpt = 'none'
+        pk_DirectCellOptDdec='none'
+        pk_CellOpt ='none'
+        bandgap = [np.nan,np.nan]
+        cellopt_check='none'
+        pk_CifData = 'none'
+        # Start QB: first if WC started, then if ended
+        qb = QueryBuilder()
+        qb.append(StructureData, filters={'label': structure}, tag='inp_struct')
+        qb.append(WorkCalculation, filters={'label':prevWorkflow},output_of='inp_struct', tag='wf')
+        qb.append(CifData, edge_filters={'label': 'output_structure'},output_of='wf',tag='cifdata')
+        qb.append(StructureData, descendant_of='cifdata', tag='opt_struct')
+        qb.append(WorkCalculation, filters={'label':{'==':workflow_label}}, output_of='opt_struct', tag='wf2')
+        qb.order_by({WorkCalculation:{'ctime':'desc'}})
+        if len(qb.all())>0:
+            pk_DirectCellOptDdec=str(qb.all()[last][0].pk)
+            qb.append(WorkCalculation, filters={'label':{'==':'Cp2kCellOptWorkChain'}}, output_of='wf2', tag='cellopt')
+            qb.append(WorkCalculation, filters={'label':{'==':'Cp2kDftBaseWorkChain'}}, output_of='cellopt', tag='dftbase')
+            qb.append(JobCalculation,output_of='dftbase',tag='calc')
+            qb.order_by({WorkCalculation:{'ctime':'desc'}})
+            try:
+                localpath_CellOpt =  qb.all()[last][0].out.retrieved.get_abs_path()+'/path/aiida.out'
+                pk_CellOpt = str(qb.all()[last][0].pk)
+            except:
+                localpath_CellOpt=None
+                pass
+            # If WC ended, parse stuff
+            if localpath_CellOpt!='none':
+                stepsfile = dir_out + structure + "_" + workflow_label + "_steps.out"
+                with open(stepsfile, 'w+') as fout:
+                    with redirect_stdout(fout):
+                        print_header()
+                        if os.path.exists(localpath_CellOpt):
+                            # Print steps for cp2k.out to _steps.out w/redirect
+                            print_steps(localpath_CellOpt)
+                            # Print bandgap and store the min bg excluding the Stage0 where the geometry can be weird
+                            bandgap = get_bandgap(localpath_CellOpt)
+                        else:
+                            bandgap = [404,404] #Missing file
+                try:
+                    # Plot graph only if at least Stage1 is finished
+                    plot_steps(stepsfile, structure)
+                    # Check the energy convergence of the whole wf
+                    cellopt_check=directcellopt_check(stepsfile)
+                except:
+                    cellopt_check='WARNING'
+                # See if the final DDEC cif exist
+                qb.append(CifData, edge_filters={'label': 'output_structure'},output_of='wf2',tag='cifdata2')
+                try:
+                    pk_CifData = str(qb.all()[last][0].pk)
+                except:
                     pass
-        # Print file with pk and local directory
-        print('%s\t%s\t%s' %("CellOpt",cellopt_pk,cellopt_localpath), file=pkfile)
-        pkfile.close()
-        # Print on screen the state of the calculation
-        bgfile = open(dir_out + structure + "_" + workflow_label + "_bg.out","w+")
-        stepsfile = dir_out + structure + "_" + workflow_label + "_steps.out"
-        with open(stepsfile, 'w+') as fout:
-            with redirect_stdout(fout):
-                print_header()
-                if os.path.exists(cellopt_localpath):
-                        # Print steps for cp2k.out to _steps.out w/redirect
-                        print_steps(cellopt_localpath)
-                        # Print bandgap and store the min bg excluding the Stage0 where the geometry can be weird
-                        bandgap = get_bandgap(cellopt_localpath)
-                        if min(bandgap)< minbg:
-                            minbg = min(bandgap)
-                        print('%s\t%f\t%f'%("CellOpt",bandgap[0],bandgap[1]), file=bgfile)
-                else:
-                        mex = "WARNING_cp2k.out_missing"
-                bgfile.close()
-        # Plot graph only if at least Stage1 is finished
-        #plot_steps(stepsfile, structure)
-        # Check the energy convergence of the whole wf
-        #mexcheck=cellopt_check(stepsfile)
-    #Print info on screem
-    print('%-10s %-28s %-15s %-13.3f %-s' %(structure,pk_work,mex,minbg,mexcheck))
+
+        #Print info on screen (for localpath print the directory, not the file aiida.out)
+        if localpath_CellOpt[-9:]=='aiida.out':
+            localpath_CellOpt=localpath_CellOpt[:-9]
+        print('{:<9s} {:<12s} {:<10s} {:<8.3f} {:<7.3f} {:<30s} {:<10s} {:s}'.format(structure,pk_DirectCellOptDdec,pk_CellOpt,bandgap[0],bandgap[1],cellopt_check,pk_CifData,localpath_CellOpt))
