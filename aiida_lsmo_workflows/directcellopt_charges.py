@@ -163,7 +163,7 @@ class Cp2kDirectCellOptDdecWorkChain(WorkChain):
             'structure'     : self.ctx.structure,
             'min_cell_size' : self.inputs.min_cell_size,
             '_options'      : self.inputs._cp2k_options,
-            '_label'        : "Cp2kRobustCellOptWorkChain",
+            '_label'        : "Cp2kCellOptWorkChain",
         }
 
         # Trying to guess the multiplicity of the system
