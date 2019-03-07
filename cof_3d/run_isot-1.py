@@ -103,7 +103,7 @@ for id in ids:
         structure=structure,
         zeopp_code=zeopp_code,
         _zeopp_options=zeopp_options,
-        zeopp_probe_radius=zeopp_probe_radius_co2_trappe,
+        zeopp_probe_radius=zeopp_probe_radius_co2_trappe, #mistake!!!!!!!!!!!!!!!!!
         zeopp_atomic_radii=zeopp_atomic_radii_file,
         raspa_code=raspa_code,
         raspa_parameters=ParameterData(dict=dict_merge_ez(raspa_params_general,raspa_params_n2)),
