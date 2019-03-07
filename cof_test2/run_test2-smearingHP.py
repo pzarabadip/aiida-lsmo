@@ -13,7 +13,7 @@ cp2k_code = test_and_get_code('cp2k-5.1@fidis', expected_code_type='cp2k')
 ddec_code = test_and_get_code('ddec@fidis', expected_code_type='ddec')
 cp2k_options = {
     "resources": {
-        "num_machines": 2,
+        "num_machines": 8,
     },
     "max_wallclock_seconds": 72 * 60 * 60,
     }
@@ -21,7 +21,7 @@ ddec_options = {
     "resources": {
         "num_machines": 1,
     },
-    "max_wallclock_seconds": 5 * 60 * 60,
+    "max_wallclock_seconds": 24 * 60 * 60,
     "withmpi": False,
     }
 
@@ -40,6 +40,9 @@ params_dict = {
 params_dict = {
     'FORCE_EVAL': {
         'DFT': {
+            'MGRID': {
+                'CUTOFF':     1200,
+                },
             'SCF': {
                 'EPS_SCF': 1.0E-6,
                 'MAX_SCF': 500,
@@ -60,12 +63,15 @@ params_dict = {
                 'OUTER_SCF': {
                     '_': False,
                     },
+                #https://groups.google.com/forum/#!topic/cp2k/OQczYEVvpME, for metallic systems
                 'MIXING': {
                     '_': True,
                     'METHOD': 'BROYDEN_MIXING',
-                    'ALPHA': 0.4,
+                    'ALPHA': 0.1,
+                    'BETA': 1.5,
                     'NBROYDEN': 8,
                     },
+                'CHOLESKY': 'INVERSE',
                 },
             },
         },
@@ -75,7 +81,7 @@ params_dict = {
             'STEPS': 100,                           #default: 3
             'TIMESTEP': '[fs] 0.5',                 #default: [fs] 0.5
             'TEMPERATURE': '[K] 400',               #default: [K] 300
-            'DISPLACEMENT_TOL': '[angstrom] 1.0',   #default: [bohr] 100
+            'DISPLACEMENT_TOL': '[angstrom] 0.5',   #default: [bohr] 100
             'THERMOSTAT' : {
                 'REGION': 'GLOBAL',                 #default: GLOBAL
                 'TYPE': 'CSVR',
@@ -91,7 +97,7 @@ params_dict = {
         'CELL_OPT': {
             'OPTIMIZER': 'LBFGS',                    #default: BFGS
             'LBFGS' : {
-                'TRUST_RADIUS': '[angstrom] 0.5',     #default: None
+                'TRUST_RADIUS': '[angstrom] 0.5',    #default: None
             },
             'MAX_ITER': 1000,
             'KEEP_ANGLES' : False,
@@ -101,9 +107,8 @@ params_dict = {
 cp2k_parameters = ParameterData(dict=params_dict)
 
 # Using lists to specify the IDs
-with open('list-smearing2.list') as f:
-    ids=f.read().splitlines()
-#ids=['10010N2']
+ids=['18081N2','18082N2'] #7Mar, trying to make these converge with very high settings
+
 all_structures = [ "/home/daniele/Documents/CoRE-COFs/cifs/{}.cif".format(x) for x in ids]
 # Submit the calculations
 for s in all_structures:
@@ -119,7 +124,7 @@ for s in all_structures:
         _cp2k_options=cp2k_options,
         ddec_code=ddec_code,
         _ddec_options=ddec_options,
-        _label='test2-smearing',
+        _label='test2-smearingHP',
         _guess_multiplicity=True,
         min_cell_size=Float(5.0)
         )

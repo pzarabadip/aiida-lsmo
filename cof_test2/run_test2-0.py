@@ -13,7 +13,7 @@ cp2k_code = test_and_get_code('cp2k-5.1@fidis', expected_code_type='cp2k')
 ddec_code = test_and_get_code('ddec@fidis', expected_code_type='ddec')
 cp2k_options = {
     "resources": {
-        "num_machines": 3,
+        "num_machines": 2,
     },
     "max_wallclock_seconds": 72 * 60 * 60,
     }
@@ -74,7 +74,8 @@ cp2k_parameters = ParameterData(dict=params_dict)
 with open('list-N.list') as f:
     ids=f.read().splitlines()
 #ids=['16131N3'] #the biggest (removed from list-1617)
-#ids=['12010N2','14072N2']
+#ids=['07012N3']
+ids=['18080N2','18082N2'] #changed cif (28Feb)
 all_structures = [ "/home/daniele/Documents/CoRE-COFs/cifs/{}.cif".format(x) for x in ids]
 # Submit the calculations
 for s in all_structures:

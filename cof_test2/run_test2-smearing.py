@@ -13,7 +13,7 @@ cp2k_code = test_and_get_code('cp2k-5.1@fidis', expected_code_type='cp2k')
 ddec_code = test_and_get_code('ddec@fidis', expected_code_type='ddec')
 cp2k_options = {
     "resources": {
-        "num_machines": 4,
+        "num_machines": 10,
     },
     "max_wallclock_seconds": 72 * 60 * 60,
     }
@@ -106,7 +106,11 @@ cp2k_parameters = ParameterData(dict=params_dict)
 #ids=['12020N2','12060N2','12061N2','12062N2']
 #ids=['16131N3']
 #ids=['11010N2']
-ids=['18081N2']
+#ids=['18081N2']
+#ids=['13161N2','16131N3'] #5Mar, 12cpus@gacrux > FROZEN
+#ids=['18082N2'] # 5Mar, 5cpus@fidis
+ids=['13161N2','16131N3'] #7Mar, resubmitted after frozen, 10cpus@gacrux
+
 
 all_structures = [ "/home/daniele/Documents/CoRE-COFs/cifs/{}.cif".format(x) for x in ids]
 # Submit the calculations

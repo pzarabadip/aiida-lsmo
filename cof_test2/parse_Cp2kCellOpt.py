@@ -1,5 +1,4 @@
 from __future__ import print_function
-from aiida.orm.data.structure import StructureData
 from aiida.orm.calculation.work import WorkCalculation
 import sys
 import os
@@ -11,6 +10,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 sys.path.append('/home/daniele/Programs/cp2k_utils/parse_steps')
 from parser_utils import print_header, print_steps
+ParameterData = DataFactory('parameter')
+StructureData = DataFactory('structure')
+CifData = DataFactory('cif')
 
 from contextlib import contextmanager
 @contextmanager
@@ -110,12 +112,13 @@ def plot_steps(stepsfile, structure):
     plt.close(fig)
     return
 
-# User settings
-last = 0 #select the Nth last result in time
-workflow_label = 'test2-smearing'
-with open('list-N.list') as f:
+# User settings ************************************************************************************
+last = 1 #select the Nth last result in time
+workflow_label = 'test2-smearing3'
+with open('list-smearing.list') as f:
     structure_labels=f.read().splitlines()
-#structure_labels=['13182N3'] #test
+structure_labels=['18081N2'] #
+
 # General settings
 stage_name = ['Stage0_Energy','Stage1_CellOpt','Stage2_MD','Stage3_CellOpt']
 dir_out="./parse_Cp2kCellOpt/"
@@ -124,12 +127,13 @@ if not os.path.exists(dir_out):
 dir_out="./parse_Cp2kCellOpt/"+workflow_label+"/"
 if not os.path.exists(dir_out):
     os.makedirs(dir_out)
-
+# Print header on screen
+print('Structure  pk_Cp2kCellOptDdecWorkChain  Completed       min(BandGap)  pk_CifDDEC  CellOpt_check ')
 for structure in structure_labels:
     stage_localpath = ["INCOMPLETE"] * 4
     stage_pk = ["INCOMPLETE"] * 4
-
-    # get first the pk of the main workflow Cp2kCellOptDdecWorkChain
+    pk_CifDDEC = 'none'
+    # get first the pk of the main workflow Cp2kCellOptDdecWorkChain and of the final cif
     qb = QueryBuilder()
     qb.append(StructureData, filters={'label': {'==':structure}}, tag='structure')
     qb.append(WorkCalculation, filters={'label':{'==':workflow_label}}, output_of='structure', tag='workflow')
@@ -141,9 +145,16 @@ for structure in structure_labels:
     else:
         pk_work=str(qb.all()[last][0].pk)
         pkfile = open(dir_out + structure + "_" + workflow_label + "_pk.out","w+")
+        try: #get the final cif
+            qb.append(CifData, edge_filters={'label': 'output_structure'},output_of='workflow')
+            qb.order_by({WorkCalculation:{'ctime':'desc'}})
+            pk_CifDDEC = str(qb.all()[last][0].pk)
+        except:
+            pass
+
         # Search for the path for the 5 steps: energy, cell_opt, md, geo_opt, cell_opt. Store them.
         for istage in range(4):
-            if istage == 0 or stage_localpath[istage-1] != "INCOMPLETE":
+            if istage == 0 or stage_localpath[istage-1] != "INCOMPLETE": #stop if the previous stage was incomplete
                 qb = QueryBuilder()
                 qb.append(StructureData, filters={'label': {'==':structure}}, tag='structure')
                 qb.append(WorkCalculation, filters={'label':{'==':workflow_label}}, output_of='structure', tag='workflow')
@@ -179,9 +190,9 @@ for structure in structure_labels:
                     if os.path.exists(stage_localpath[i]):
                         # Print steps for cp2k.out to _steps.out w/redirect
                         print_steps(stage_localpath[i])
-                        # Print bandgap and check if there are warnings for low bg
+                        # Print bandgap and store the min bg excluding the Stage0 where the geometry can be weird
                         bandgap = get_bandgap(stage_localpath[i])
-                        if min(bandgap)< minbg:
+                        if i>0 and min(bandgap)< minbg:
                             minbg = min(bandgap)
                         print('%s\t%f\t%f'%(stage_name[i],bandgap[0],bandgap[1]), file=bgfile)
                     else:
@@ -195,5 +206,5 @@ for structure in structure_labels:
            mexcheck=cellopt_check(stepsfile)
         else:
            mexcheck='still-running_or_crashed'
-
-    print('%s\tpk: %s\tCompleted: %s\tmin(BandGap): %.3f\tCellOpt_check: %s' %(structure,pk_work,mex,minbg,mexcheck))
+    #Print info on screem
+    print('%-10s %-28s %-15s %-13.3f %-11s %-s' %(structure,pk_work,mex,minbg,pk_CifDDEC,mexcheck))
