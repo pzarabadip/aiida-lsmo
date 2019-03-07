@@ -31,30 +31,32 @@ for structure_label in structure_labels:
         q.append(WorkCalculation, filters={'label': workflow1_label}, output_of='inp_struct', tag='wf1')
         q.append(CifData, edge_filters={'label': 'output_structure'}, output_of='wf1', tag='cif')
         q.append(WorkCalculation, filters={'label': workflow2_label}, output_of='cif', tag='wf2')
-        pk_work = q.all()[last][0].pk
-        print("{} (PK: {} ) ".format(workflow2_label,pk_work),end="",file=ofile)
-        q.append(ParameterData, output_of='wf2')
-        # Parse results
-        try:
-            res = q.all()[last][0].get_dict()
-        except: # the calculation is absent or not finished
-            print("{:74s}".format(""),end="",file=ofile)
-            res=None
-        if res!=None:
+        if len(q.all())>0:
+            pk_work = q.all()[last][0].pk
+            print("{} (PK: {} ) ".format(workflow2_label,pk_work),end="",file=ofile)
+            q.append(ParameterData, output_of='wf2')
+            # Parse results
             try:
-                print("POA-vf = {:.2f}, Blocking_spheres = {}, Kh = {:.2e} +/- {:.2e} {} ".format(
-                    res['POAV_Volume_fraction'],
-                    res['number_blocking_spheres'],
-                    res['henry_coefficient_average'],
-                    res['henry_coefficient_dev'],
-                    res['henry_coefficient_units'],
-                    ),
-                    end="",file=ofile)
-            except:
-                print("NOT POROUS {:62s} ".format(""),end="",file=ofile)
+                res = q.all()[last][0].get_dict()
+            except: # the calculation is absent or not finished
+                print("{:74s}".format(""),end="",file=ofile)
+                res=None
+            if res!=None:
+                try:
+                    print("POA-vf = {:.2f}, Blocking_spheres = {}, Kh = {:.2e} +/- {:.2e} {} ".format(
+                        res['POAV_Volume_fraction'],
+                        res['number_blocking_spheres'],
+                        res['henry_coefficient_average'],
+                        res['henry_coefficient_dev'],
+                        res['henry_coefficient_units'],
+                        ),
+                        end="",file=ofile)
+                except:
+                    print("NOT POROUS {:62s} ".format(""),end="",file=ofile)
     print(end="\n",file=ofile)
 ofile.close()
 ########################################## Print isotherms for parassitic energy
+'''
 dir_out="./parse_VolpoKhIsotherm/"
 if not os.path.exists(dir_out):
     os.makedirs(dir_out)
@@ -117,3 +119,4 @@ for structure_label in structure_labels:
     if porous:
         ax[0].legend()
         fig.savefig(dir_out+"/"+structure_label+".png",dpi=300)
+'''

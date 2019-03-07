@@ -74,6 +74,8 @@ with open('../cof_test2/list-OT.list') as f:
     ids=f.read().splitlines()
 ids=ids[:50]
 ids=['05001N2','07000N2','07013N3','11001N2','13011N2','13040N3','13072N2'] #6Mar, only N2, resubmitted after they crashed because of the "None" problem
+ids=['07002N2', '07012N3', '08000N3', '08013N2', '08020N2', '09000N3', '10000N2', '10020N2', '11000N2', '11001N2', '11003N2', '11020N2', '11031N2', '12000N2', '12001N2', '12010N2', '12011N2', '12040N2', '12050N2', '12062N2', '13040N3', '13051N2'] # #7Mar, resubmitted only CO2, after frozen
+
 prevwf_label = 'test2-0'
 for id in ids:
     q = QueryBuilder()
