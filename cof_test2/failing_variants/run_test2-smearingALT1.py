@@ -9,11 +9,11 @@ ParameterData = DataFactory('parameter')
 StructureData = DataFactory('structure')
 
 # Test the codes and specify the nodes and walltime
-cp2k_code = test_and_get_code('cp2k-5.1@fidis', expected_code_type='cp2k')
+cp2k_code = test_and_get_code('cp2k-5.1@gacrux', expected_code_type='cp2k')
 ddec_code = test_and_get_code('ddec@fidis', expected_code_type='ddec')
 cp2k_options = {
     "resources": {
-        "num_machines": 8,
+        "num_machines": 7,
     },
     "max_wallclock_seconds": 72 * 60 * 60,
     }
@@ -41,11 +41,11 @@ params_dict = {
     'FORCE_EVAL': {
         'DFT': {
             'MGRID': {
-                'CUTOFF':     1200,
+                'CUTOFF':     1000,                                             # STD=600
                 },
             'SCF': {
-                'EPS_SCF': 1.0E-6,
-                'MAX_SCF': 500,
+                'EPS_SCF': 1.0E-5,
+                'MAX_SCF': 5000,
                 'MAX_ITER_LUMO': 10000,
                 'ADDED_MOS': 1000,
                 'SMEAR': {
@@ -78,10 +78,10 @@ params_dict = {
     'MOTION': {
         'MD': {
             'ENSEMBLE': 'NPT_F',                    #main options: NVT, NPT_F
-            'STEPS': 100,                           #default: 3
+            'STEPS': 0,                             #default: 3                 # STD=100
             'TIMESTEP': '[fs] 0.5',                 #default: [fs] 0.5
             'TEMPERATURE': '[K] 400',               #default: [K] 300
-            'DISPLACEMENT_TOL': '[angstrom] 0.5',   #default: [bohr] 100
+            'DISPLACEMENT_TOL': '[angstrom] 1.0',   #default: [bohr] 100
             'THERMOSTAT' : {
                 'REGION': 'GLOBAL',                 #default: GLOBAL
                 'TYPE': 'CSVR',
@@ -97,7 +97,7 @@ params_dict = {
         'CELL_OPT': {
             'OPTIMIZER': 'LBFGS',                    #default: BFGS
             'LBFGS' : {
-                'TRUST_RADIUS': '[angstrom] 0.5',    #default: None
+                'TRUST_RADIUS': '[angstrom] 0.2',     #default: None            # STD=0.5
             },
             'MAX_ITER': 1000,
             'KEEP_ANGLES' : False,
@@ -107,7 +107,7 @@ params_dict = {
 cp2k_parameters = ParameterData(dict=params_dict)
 
 # Using lists to specify the IDs
-ids=['18081N2','18082N2'] #7Mar, trying to make these converge with very high settings
+ids=['13161N2','18081N2','18082N2'] #12Mar, 7cpus@gacrux
 
 all_structures = [ "/home/daniele/Documents/CoRE-COFs/cifs/{}.cif".format(x) for x in ids]
 # Submit the calculations
@@ -124,7 +124,7 @@ for s in all_structures:
         _cp2k_options=cp2k_options,
         ddec_code=ddec_code,
         _ddec_options=ddec_options,
-        _label='test2-smearingHP',
+        _label='test2-smearingALT1',
         _guess_multiplicity=True,
         min_cell_size=Float(5.0)
         )

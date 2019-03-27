@@ -50,17 +50,17 @@ def get_startindex(l):
 
 def cellopt_check(stepsfile):
     '''Given the _steps.out file, evaluates the geometry convergence'''
-    data = pd.read_csv(stepsfile,sep=' ')
-    if data['#step'].iloc[-1]==1000:
+    df = pd.read_csv(stepsfile,sep=' ')
+    if df['#step'].iloc[-1]==1000:
         mex = 'cellopt_reached_1000'
     else:
         #Look for the min energy value, getting rid of weird low energy data
         for i in range(10):
-            min0=data['energy(Ha)'].sort_values().iloc[i]
-            min1=data['energy(Ha)'].sort_values().iloc[i+1]
+            min0=df['energy(Ha)'].sort_values().iloc[i]
+            min1=df['energy(Ha)'].sort_values().iloc[i+1]
             if min1-min0<0.1: #Tollerance (Ha) to decide if a min is weird
                 break
-        ediff=data['energy(Ha)'].iloc[-1]-min0
+        ediff=df['energy(Ha)'].iloc[-1]-min0
         ethr = 0.005 #Tollerance (Ha) to decide if the difference is relevant
         if ediff>ethr:
             mex = 'energy[-1]_>_min(energy)+{0}Ha_ediff={1:.3f}Ha'.format(ethr,ediff)
@@ -68,11 +68,12 @@ def cellopt_check(stepsfile):
             mex = 'EVERYTHING_FINE'
     return mex
 
-def plot_steps(stepsfile, structure):
+def plot_steps(stepsfile, structure_label):
     """ Function to plot the graph of the energy """
+    df = pd.read_csv(stepsfile,sep=' ')
 
-    steps = np.genfromtxt(stepsfile, delimiter="", comments="#",usecols = (0))
-    energy = np.genfromtxt(stepsfile, delimiter="", comments="#",usecols = (1))
+    steps = df['#step'].tolist()
+    energy = df['energy(eV/atom)'].tolist()
 
     # Take min and max, neglecting spikes
     min_energy = +9999.
@@ -90,9 +91,9 @@ def plot_steps(stepsfile, structure):
     max_energy_shifted = max_energy-min_energy
 
     fig, ax = plt.subplots(figsize=[8, 4.5])
-    ax.set(title='Robust cell optimization of: '+ structure,
+    ax.set(title='Robust cell optimization of: '+ structure_label,
            xlabel='Steps',
-           ylabel='Energy (Hartree)',
+           ylabel='Energy (eV/atom)',
            ylim=[-0.01*max_energy_shifted, +1.01*max_energy_shifted],
            )
     ax.yaxis.set_major_formatter(matplotlib.ticker.StrMethodFormatter('{x:,.3f}'))
@@ -110,32 +111,50 @@ def plot_steps(stepsfile, structure):
 
     fig.savefig(stepsfile[:-4]+".png",dpi=300)
     plt.close(fig)
-    return
+
+    #compute the relaxation dE for cellopt1 and cellopt2
+    idx_co1 = startindex[2]-1 # Index of the last cellopt1
+    steps_co1 = startindex[2]-1-1 #nuber of steps of cellopt1 (<20)
+    dE_cellopt1 = df.loc[[idx_co1],['energy(eV/atom)']].values[0] - df.loc[[1],['energy(eV/atom)']].values[0]
+    dE_disp1 = df.loc[[idx_co1],['dispersion(eV/atom)']].values[0] - df.loc[[1],['dispersion(eV/atom)']].values[0]
+    if len(startindex) > 4:
+        idx_last = startindex[4]-1
+        dE_cellopt2 = df.loc[[idx_last ],['energy(eV/atom)']].values[0] - df.loc[[idx_co1],['energy(eV/atom)']].values[0]
+        dE_disp2 = df.loc[[idx_last ],['dispersion(eV/atom)']].values[0] - df.loc[[idx_co1],['dispersion(eV/atom)']].values[0]
+    else:
+        dE_cellopt2 = np.nan
+        dE_disp2 = np.nan
+
+    return dE_cellopt1, dE_cellopt2, dE_disp1, dE_disp2, steps_co1
 
 # User settings ************************************************************************************
-last = 1 #select the Nth last result in time
-workflow_label = 'test2-smearing3'
-with open('list-smearing.list') as f:
+last = 0 #select the Nth last result in time
+workflow_list = ['test2-0','list-OT.list']
+#workflow_list = ['test2-0','list-smearing.list']
+#workflow_list = ['test2-smearing','list-smearing.list']
+workflow_label = workflow_list[0]
+list_label = workflow_list[1]
+with open(list_label) as f:
     structure_labels=f.read().splitlines()
-structure_labels=['18081N2'] #
+#structure_labels=structure_labels[:1]
 
 # General settings
 stage_name = ['Stage0_Energy','Stage1_CellOpt','Stage2_MD','Stage3_CellOpt']
 dir_out="./parse_Cp2kCellOpt/"
 if not os.path.exists(dir_out):
     os.makedirs(dir_out)
-dir_out="./parse_Cp2kCellOpt/"+workflow_label+"/"
+dir_out="./parse_Cp2kCellOpt/{}_{}/".format(workflow_label,list_label)
 if not os.path.exists(dir_out):
     os.makedirs(dir_out)
 # Print header on screen
-print('Structure  pk_Cp2kCellOptDdecWorkChain  Completed       min(BandGap)  pk_CifDDEC  CellOpt_check ')
-for structure in structure_labels:
+print('Structure  pk_Cp2kCellOptDdecWorkChain  Completed       min(BandGap)  co1 dE1_eV/a dE2_eV/a dD1_eV/a dD2_eV/a  pk_CifDDEC  CellOpt_check ')
+for structure_label in structure_labels:
     stage_localpath = ["INCOMPLETE"] * 4
     stage_pk = ["INCOMPLETE"] * 4
     pk_CifDDEC = 'none'
     # get first the pk of the main workflow Cp2kCellOptDdecWorkChain and of the final cif
     qb = QueryBuilder()
-    qb.append(StructureData, filters={'label': {'==':structure}}, tag='structure')
+    qb.append(StructureData, filters={'label': {'==':structure_label}}, tag='structure')
     qb.append(WorkCalculation, filters={'label':{'==':workflow_label}}, output_of='structure', tag='workflow')
     if len(qb.all())==0:
         pk_work=0
@@ -144,7 +163,7 @@ for structure in structure_labels:
         minbg = np.inf
     else:
         pk_work=str(qb.all()[last][0].pk)
-        pkfile = open(dir_out + structure + "_" + workflow_label + "_pk.out","w+")
+        pkfile = open(dir_out + structure_label + "_" + workflow_label + "_pk.out","w+")
         try: #get the final cif
             qb.append(CifData, edge_filters={'label': 'output_structure'},output_of='workflow')
             qb.order_by({WorkCalculation:{'ctime':'desc'}})
@@ -152,11 +171,11 @@ for structure in structure_labels:
         except:
             pass
 
-        # Search for the path for the 5 steps: energy, cell_opt, md, geo_opt, cell_opt. Store them.
+        # Search for the path for the 4 stages: energy, cell_opt, md, cell_opt. Store them.
         for istage in range(4):
             if istage == 0 or stage_localpath[istage-1] != "INCOMPLETE": #stop if the previous stage was incomplete
                 qb = QueryBuilder()
-                qb.append(StructureData, filters={'label': {'==':structure}}, tag='structure')
+                qb.append(StructureData, filters={'label': {'==':structure_label}}, tag='structure')
                 qb.append(WorkCalculation, filters={'label':{'==':workflow_label}}, output_of='structure', tag='workflow')
                 qb.append(WorkCalculation, filters={'label':{'==':'Cp2kRobustCellOptWorkChain'}}, output_of='workflow', tag='robustcellopt')
                 if istage == 0:
@@ -180,9 +199,9 @@ for structure in structure_labels:
             mex = "None"
         else:
             mex = stage_name[completed_stage]
-        bgfile = open(dir_out + structure + "_" + workflow_label + "_bg.out","w+")
+        bgfile = open(dir_out + structure_label + "_" + workflow_label + "_bg.out","w+")
         minbg = np.inf
-        stepsfile = dir_out + structure + "_" + workflow_label + "_steps.out"
+        stepsfile = dir_out + structure_label + "_" + workflow_label + "_steps.out"
         with open(stepsfile, 'w+') as fout:
             with redirect_stdout(fout):
                 print_header()
@@ -198,13 +217,19 @@ for structure in structure_labels:
                     else:
                         mex = "WARNING_cp2k.out_missing"
                 bgfile.close()
+
         # Plot graph only if at least Stage1 is finished
         if completed_stage>=1:
-            plot_steps(stepsfile, structure)
+            dE_cellopt1, dE_cellopt2, dE_disp1, dE_disp2, steps_co1 = plot_steps(stepsfile, structure_label)
+        else:
+            dE_cellopt1, dE_cellopt2, dE_disp1, dE_disp2, steps_co1 = np.nan, np.nan, np.nan, np.nan
         # Check the energy convergence of the whole wf
         if completed_stage==3:
            mexcheck=cellopt_check(stepsfile)
         else:
            mexcheck='still-running_or_crashed'
     #Print info on screem
-    print('%-10s %-28s %-15s %-13.3f %-11s %-s' %(structure,pk_work,mex,minbg,pk_CifDDEC,mexcheck))
+    print('%-10s %-28s %-15s %-13.3f %-3d %-+8.4f %-+8.4f %-+8.4f %-+8.4f  %-11s %-s' %(
+           structure_label, pk_work, mex,minbg,
+           steps_co1, dE_cellopt1, dE_cellopt2, dE_disp1, dE_disp2,
+           pk_CifDDEC,mexcheck))
