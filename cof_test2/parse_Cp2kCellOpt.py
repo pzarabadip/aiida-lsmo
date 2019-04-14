@@ -119,13 +119,15 @@ def plot_steps(stepsfile, structure_label):
     dE_disp1 = df.loc[[idx_co1],['dispersion(eV/atom)']].values[0] - df.loc[[1],['dispersion(eV/atom)']].values[0]
     if len(startindex) > 4:
         idx_last = startindex[4]-1
+        steps_co2 = idx_last-startindex[3]+1
         dE_cellopt2 = df.loc[[idx_last ],['energy(eV/atom)']].values[0] - df.loc[[idx_co1],['energy(eV/atom)']].values[0]
         dE_disp2 = df.loc[[idx_last ],['dispersion(eV/atom)']].values[0] - df.loc[[idx_co1],['dispersion(eV/atom)']].values[0]
     else:
+        steps_co2 = 0
         dE_cellopt2 = np.nan
         dE_disp2 = np.nan
 
-    return dE_cellopt1, dE_cellopt2, dE_disp1, dE_disp2, steps_co1
+    return steps_co1, steps_co2, dE_cellopt1, dE_cellopt2, dE_disp1, dE_disp2
 
 # User settings ************************************************************************************
 last = 0 #select the Nth last result in time
@@ -136,7 +138,7 @@ workflow_label = workflow_list[0]
 list_label = workflow_list[1]
 with open(list_label) as f:
     structure_labels=f.read().splitlines()
-#structure_labels=structure_labels[:1]
+#structure_labels=structure_labels[-3:]
 
 # General settings
 stage_name = ['Stage0_Energy','Stage1_CellOpt','Stage2_MD','Stage3_CellOpt']
@@ -147,7 +149,7 @@ dir_out="./parse_Cp2kCellOpt/{}_{}/".format(workflow_label,list_label)
 if not os.path.exists(dir_out):
     os.makedirs(dir_out)
 # Print header on screen
-print('Structure  pk_Cp2kCellOptDdecWorkChain  Completed       min(BandGap)  co1 dE1_eV/a dE2_eV/a dD1_eV/a dD2_eV/a  pk_CifDDEC  CellOpt_check ')
+print('Structure  pk_Cp2kCellOptDdecWorkChain  Completed       min(BandGap)  nst1 nst2 dE1_eV/a dE2_eV/a dD1_eV/a dD2_eV/a  pk_CifDDEC  CellOpt_check ')
 for structure_label in structure_labels:
     stage_localpath = ["INCOMPLETE"] * 4
     stage_pk = ["INCOMPLETE"] * 4
@@ -220,16 +222,16 @@ for structure_label in structure_labels:
 
         # Plot graph only if at least Stage1 is finished
         if completed_stage>=1:
-            dE_cellopt1, dE_cellopt2, dE_disp1, dE_disp2, steps_co1 = plot_steps(stepsfile, structure_label)
+            steps_co1, steps_co2, dE_cellopt1, dE_cellopt2, dE_disp1, dE_disp2 = plot_steps(stepsfile, structure_label)
         else:
-            dE_cellopt1, dE_cellopt2, dE_disp1, dE_disp2, steps_co1 = np.nan, np.nan, np.nan, np.nan
+            steps_co1, steps_co2, dE_cellopt1, dE_cellopt2, dE_disp1, dE_disp2 = 0, 0, np.nan, np.nan, np.nan
         # Check the energy convergence of the whole wf
         if completed_stage==3:
            mexcheck=cellopt_check(stepsfile)
         else:
            mexcheck='still-running_or_crashed'
     #Print info on screem
-    print('%-10s %-28s %-15s %-13.3f %-3d %-+8.4f %-+8.4f %-+8.4f %-+8.4f  %-11s %-s' %(
+    print('%-10s %-28s %-15s %-13.3f %-4d %-4d %-+8.4f %-+8.4f %-+8.4f %-+8.4f  %-11s %-s' %(
            structure_label, pk_work, mex,minbg,
-           steps_co1, dE_cellopt1, dE_cellopt2, dE_disp1, dE_disp2,
+           steps_co1, steps_co2, dE_cellopt1, dE_cellopt2, dE_disp1, dE_disp2,
            pk_CifDDEC,mexcheck))

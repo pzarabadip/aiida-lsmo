@@ -17,9 +17,9 @@ last = 0 #select the Nth last result in time
 workflow1_label = 'test2-smearing'
 workflow21_label = 'pe2-co2'
 workflow22_label = 'pe2-n2'
-with open('../cof_test2/list-smearing.list') as f:
+with open('../cof_test2/list-OT.list') as f:
     structure_labels=f.read().splitlines()
-structure_labels=structure_labels[:50]
+structure_labels=['16131N3']
 ############################################################ Print vol & Kh info
 ofile = open("parse_VolpoKhIsotherm.out","w+")
 
@@ -93,27 +93,10 @@ for structure_label in structure_labels:
             # TRICK: use the enthalpy from widom (energy-RT) which is more accurate that the one at 0.001 bar (and which also is NaN for weakly interacting systems)
             h_avg[0] = res['adsorption_energy_average']-res['temperature']/120.027
             h_dev[0] = res['adsorption_energy_dev']
-            # Create directories
-            structure_dir=dir_out+structure_label+"/"
-            if not os.path.exists(structure_dir):
-                os.makedirs(structure_dir)
-            structure_dir_gas=structure_dir+gas+"/"
-            if not os.path.exists(structure_dir_gas):
-                os.makedirs(structure_dir_gas)
-            # Print header and info
-            ofile = open(structure_dir_gas+"300K.csv","w+")
-            print("pressure(Pa) loading(mol/kg) HoA(kJ/mol)",file=ofile)
-
-            for i in range(len(p)):
-                print("{} {} {}".format(p[i]*1e5,q_avg[i],h_avg[i]),file=ofile)
-            ofile.close()
             # Plot isotherm
             ax[0].errorbar(p,     q_avg, yerr=q_dev, marker ="o", label=gas)
             ax[1].errorbar(h_avg, q_avg, xerr=h_dev, marker ="o")
             # Print Density (converted from g/cm3 to kg/m3)
-            ofile = open(structure_dir+"rho.csv","w+")
-            print(res['Density']*1000,file=ofile)
-            ofile.close()
         else: # the material is non-porous
             break
 

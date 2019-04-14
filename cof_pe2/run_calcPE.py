@@ -35,40 +35,35 @@ def CalcPE(ResGasCO2, ResGasN2, GasIn, VF, Process, Cp, Yd, ElEff, Opt):
         res = ResGas.get_dict()
         T_iso[gas] = res["temperature"]
         iso_df[gas] = pd.DataFrame(columns = ['pressure(Pa)','loading(mol/kg)','HoA(kJ/mol)'])
-        iso_df[gas]['pressure(Pa)'] = [a[0]*1e5 for a in res['isotherm_loading']] #(bar>>Pa)
-        iso_df[gas]['loading(mol/kg)'] = [a[1] for a in res['isotherm_loading']] #(mol/kg)
-        iso_df[gas]['HoA(kJ/mol)'] = [a[1] for a in res['isotherm_enthalpy']] #(kJ/mol)
+        iso_df[gas]['pressure(Pa)'] = [a[0]*1e5 for a in res['isotherm_loading']] # converted from bar to Pa
+        iso_df[gas]['loading(mol/kg)'] = [a[1] for a in res['isotherm_loading']]
+        iso_df[gas]['HoA(kJ/mol)'] = [a[1] for a in res['isotherm_enthalpy']]
         # TRICK: use the enthalpy from widom (energy-RT) which is more accurate
         #        that the one at 0.001 bar (and which also is NaN for weakly interacting systems)
         iso_df[gas]['HoA(kJ/mol)'].loc[0] = res['adsorption_energy_average']-res['temperature']/120.027
-    pe_dict = mainPE(gasin = GasIn.value,
-                      rho = res['Density'],
-                      vf = VF.value,
-                      process = Process.value,
-                      cp = Cp.value,
-                      yd = Yd.value,
-                      eleff = ElEff.value,
-                      opt = Opt.value,
-                      T_iso = T_iso,  # [T_iso_CO2, T_iso_N2]
-                      iso_df = iso_df # [iso_df_CO2, iso_df_N2]
-                     )
 
+    pe_dict = mainPE(gasin = GasIn.value,        # e.g., "coal"
+                      rho = res['Density']*1000, # converted from g/cm3 to kg/m3
+                      vf = VF.value,             # e.g., 0.35
+                      process = Process.value,   # e.g., "TPSA"
+                      cp = Cp.value,             # e.g., 985.0, the average for MOFs in J/kg/K
+                      yd = Yd.value,             # e.g., 0.99
+                      eleff = ElEff.value,       # e.g., "carnot"
+                      opt = Opt.value,           # e.g., "PE"
+                      T_iso = T_iso,             # [T_iso_CO2, T_iso_N2]
+                      iso_df = iso_df            # [iso_df_CO2, iso_df_N2] df containing pressure (Pa), loading (mol/kg), HeatOfAdsorption (kJ/mol)
+                     )
     return ParameterData(dict=pe_dict)
 
 # User settings
 last = 0 #select the Nth last result in time
-workflow1_label = 'test2-0'
+workflow1_label = 'test2-smearing'
 workflow21_label = 'pe2-co2'
 workflow22_label = 'pe2-n2'
-with open('../cof_test2/list-OT.list') as f:
+with open('../cof_test2/list-smearing.list') as f:
     structure_labels=f.read().splitlines()
-# test
-workflow1_label = '3DCOFs-600K-OptAngles'
-workflow21_label = 'isot-2_co2'
-workflow22_label = 'isot-2_n2'
-structure_labels=['18122N']
 
-for structure_label in structure_labels:
+for structure_label in structure_labels[-1]:
     porous = False
     resgas = {}
     for i,workflow2_label in enumerate([workflow21_label,workflow22_label]):
@@ -79,12 +74,15 @@ for structure_label in structure_labels:
         q.append(CifData, edge_filters={'label': 'output_structure'}, output_of='wf1', tag='cif')
         q.append(WorkCalculation, filters={'label':workflow2_label}, output_of='cif', tag='wf2')
         q.append(ParameterData, output_of='wf2')
-        try:
+        if len(q.all())>0:
             resgas[gas] = q.all()[last][0]
-        except: # the calculation is absent, not finished or the structure is non-porous
-            break
-    # Check if the structure is porous (has 'isotherm_loading') and compute PE
-    if ('isotherm_loading' in resgas['CO_2'].get_dict()) and ('isotherm_loading' in resgas['N_2'].get_dict()):
+            # print(resgas[gas].pk) #debug
+    # Check if the structure is present, porous (has 'isotherm_loading') and compute PE
+    if ('CO_2' in resgas.keys() and
+        'N_2' in resgas.keys() and
+        'isotherm_loading' in resgas['CO_2'].get_dict() and
+        'isotherm_loading' in resgas['N_2'].get_dict()):
+        porous = True
         ResultPE = CalcPE(ResGasCO2=resgas['CO_2'],
                           ResGasN2=resgas['N_2'],
                           GasIn=Str('coal'),
@@ -96,3 +94,5 @@ for structure_label in structure_labels:
                           Opt=Str('PE'),
                          )
         printPE(structure_label,ResultPE.get_dict())
+    if not porous:
+        print("{}: not found or not porous".format(structure_label))

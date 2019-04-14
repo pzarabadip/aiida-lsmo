@@ -76,9 +76,9 @@ class VolpoKhIsothermWorkChain(WorkChain):
         spec.input("zeopp_volpo_samples_UC", valid_type=Int, default=Int(100000), required=False) #100k samples, may need more for structures bigger than 30x30x30
         spec.input("raspa_verbosity", valid_type=Int, default=Int(10), required=False)
         spec.input("raspa_widom_cycle_mult", valid_type=Int, default=Int(10), required=False)
-        spec.input("raspa_gcmc_press_precision", valid_type=Float, default=Float(0.1), required=False)
-        spec.input("raspa_gcmc_press_maxstep", valid_type=Float, default=Float(5e5), required=False)
-        spec.input("raspa_gcmc_press_max", valid_type=Float, default=Float(30e5), required=False)
+        spec.input("raspa_gcmc_press_precision", valid_type=Float, default=Float(0.1), required=False) #Precision in the sampling of the isotherm: 0.1 ok for full isotherm, 0.01 better for lowP range
+        spec.input("raspa_gcmc_press_maxstep", valid_type=Float, default=Float(5e5), required=False)   #Max distance between pressure points (Pa)
+        spec.input("raspa_gcmc_press_max", valid_type=Float, default=Float(30e5), required=False)      #Max P of the isotherm (Pa)
 
         # workflow
         spec.outline(
