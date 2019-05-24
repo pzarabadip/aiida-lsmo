@@ -36,25 +36,25 @@ def dict_merge(dct, merge_dct):
             dct[k] = merge_dct[k]
 
 spin = {
-        "H"  : 0.0,
-        "Li" : 0.0,
-        "Be" : 0.0,
-        "B"  : 0.0,
-        "C"  : 0.0,
-        "N"  : 0.0,
-        "O"  : 0.0,
-        "F"  : 0.0,
-        "Na" : 0.0,
-        "Mg" : 0.0,
-        "Al" : 0.0,
-        "Si" : 0.0,
-        "P"  : 0.0,
-        "S"  : 0.0,
-        "Cl" : 0.0,
-        "K"  : 0.0,
-        "Ca" : 0.0,
-        "Sc" : 1.0 / 2.0,  # oxidation state +2, high spin
-        "Ti" : 2.0 / 2.0,  # oxidation state +2, high spin
+        "H"  : 0.0 / 2.0,
+        "Li" : 0.0 / 2.0,  # oxidation state +1
+        "Be" : 0.0 / 2.0,  # oxidation state +2
+        "B"  : 0.0 / 2.0,
+        "C"  : 0.0 / 2.0,
+        "N"  : 0.0 / 2.0,
+        "O"  : 0.0 / 2.0,
+        "F"  : 0.0 / 2.0,
+        "Na" : 0.0 / 2.0,  # oxidation state +1
+        "Mg" : 0.0 / 2.0,  # oxidation state +2
+        "Al" : 0.0 / 2.0,  # oxidation state +3
+        "Si" : 0.0 / 2.0,
+        "P"  : 0.0 / 2.0,
+        "S"  : 0.0 / 2.0,
+        "Cl" : 0.0 / 2.0,
+        "K"  : 0.0 / 2.0,  # oxidation state +1
+        "Ca" : 0.0 / 2.0,  # oxidation state +2
+        "Sc" : 0.0 / 2.0,  # oxidation state +1
+        "Ti" : 0.0 / 2.0,  # oxidation state +4
         "V"  : 3.0 / 2.0,  # oxidation state +2, high spin
         "Cr" : 4.0 / 2.0,  # oxidation state +2, high spin
         "Mn" : 5.0 / 2.0,  # oxidation state +2, high spin
@@ -62,8 +62,8 @@ spin = {
         "Co" : 3.0 / 2.0,  # oxidation state +2, high spin
         "Ni" : 2.0 / 2.0,  # oxidation state +2, high spin
         "Cu" : 1.0 / 2.0,  # oxidation state +2, high spin
-        "Zn" : 0.0,        # oxidation state +2, high spin
-        "Zr" : 2.0 / 2.0,  # oxidation state +2, high spin
+        "Zn" : 0.0 / 2.0,  # oxidation state +2
+        "Zr" : 0.0 / 2.0,  # oxidation state +4
         }
 
 @wf
