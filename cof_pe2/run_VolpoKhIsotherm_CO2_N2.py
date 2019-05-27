@@ -17,8 +17,8 @@ def dict_merge_ez(dict1, dict2):
     return sumdicts
 
 # Test the codes and specify the nodes and walltime
-zeopp_code = test_and_get_code('zeopp@deneb', expected_code_type='zeopp.network')
-raspa_code = test_and_get_code('raspa2@deneb', expected_code_type='raspa')
+zeopp_code = test_and_get_code('zeopp@fidis', expected_code_type='zeopp.network')
+raspa_code = test_and_get_code('raspa2@fidis', expected_code_type='raspa')
 
 zeopp_options = {
     "resources": {
@@ -76,7 +76,6 @@ df=pd.read_csv("../cof_test2/pk_final.csv")
 df = df[df.extension_ok != 1].reset_index()
 
 for i in range(len(df)):
-  if i<3:
     structure_label = df.at[i,'structure']
     prevwf_label = prevwf_label_dict[df.at[i,'dft']]
     q = QueryBuilder()
@@ -107,7 +106,7 @@ for i in range(len(df)):
             _raspa_usecharges=True,
             raspa_minKh=raspa_minKh_co2,
             raspa_molsatdens=raspa_molsatdens_co2,
-            _label='pe3-co2',
+            _label='pe3-co2-fidis',
             )
         # Run for N2, using UFF-TraPPE force field
         submit(VolpoKhIsothermWorkChain,
@@ -122,5 +121,5 @@ for i in range(len(df)):
             _raspa_usecharges=True,
             raspa_minKh=raspa_minKh_n2,
             raspa_molsatdens=raspa_molsatdens_n2,
-            _label='pe3-n2',
+            _label='pe3-n2-fidis',
             )
