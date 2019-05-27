@@ -109,4 +109,5 @@ venv.bak/
 *.out
 *.png
 *.csv
+!cof_test2/pk_final.csv
 MOF74_h/
