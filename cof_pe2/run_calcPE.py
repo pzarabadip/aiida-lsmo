@@ -13,7 +13,6 @@ StructureData = DataFactory('structure')
 SinglefileData = DataFactory('singlefile')
 CifData = DataFactory('cif')
 
-
 @wf
 def CalcPE(ResGasCO2, ResGasN2, GasIn, VF, Process, Cp, Yd, ElEff, Opt):
     """ Submit calc_pe calculation using AiiDA, for the CO2 parasitic energy.
@@ -55,44 +54,36 @@ def CalcPE(ResGasCO2, ResGasN2, GasIn, VF, Process, Cp, Yd, ElEff, Opt):
                      )
     return ParameterData(dict=pe_dict)
 
-# User settings
-last = 0 #select the Nth last result in time
-workflow1_label = 'test2-smearing'
-workflow21_label = 'pe2-co2'
-workflow22_label = 'pe2-n2'
-with open('../cof_test2/list-smearing.list') as f:
-    structure_labels=f.read().splitlines()
+df = pd.read_csv("../cof_test2/pk_final.csv")
 
-for structure_label in structure_labels[-1]:
-    porous = False
-    resgas = {}
-    for i,workflow2_label in enumerate([workflow21_label,workflow22_label]):
-        gas = ['CO_2','N_2'][i]
-        q = QueryBuilder()
-        q.append(StructureData, filters={'label': structure_label}, tag='inp_struct')
-        q.append(WorkCalculation, filters={'label': workflow1_label}, output_of='inp_struct', tag='wf1')
-        q.append(CifData, edge_filters={'label': 'output_structure'}, output_of='wf1', tag='cif')
-        q.append(WorkCalculation, filters={'label':workflow2_label}, output_of='cif', tag='wf2')
-        q.append(ParameterData, output_of='wf2')
-        if len(q.all())>0:
-            resgas[gas] = q.all()[last][0]
-            # print(resgas[gas].pk) #debug
-    # Check if the structure is present, porous (has 'isotherm_loading') and compute PE
-    if ('CO_2' in resgas.keys() and
-        'N_2' in resgas.keys() and
-        'isotherm_loading' in resgas['CO_2'].get_dict() and
-        'isotherm_loading' in resgas['N_2'].get_dict()):
-        porous = True
-        ResultPE = CalcPE(ResGasCO2=resgas['CO_2'],
-                          ResGasN2=resgas['N_2'],
-                          GasIn=Str('coal'),
-                          VF=Float(0.35),
-                          Process=Str('TPSA'),
-                          Cp=Float(985.0),
-                          Yd=Float(0.99),
-                          ElEff=Str('carnot'),
-                          Opt=Str('PE'),
-                         )
-        printPE(structure_label,ResultPE.get_dict())
-    if not porous:
-        print("{}: not found or not porous".format(structure_label))
+for i in df.index:
+    if (df.at[i,'extension_ok']==0) and (df.at[i,'note']=='still_running'):
+        structure_label = df.at[i,'structure']
+        porous = False
+        resgas = {}
+        for gas in ['co2','n2']:
+            pe_pk = df.at[i,'pex-xx.pk'.replace('xx',gas)]
+            q = QueryBuilder()
+            q.append(WorkCalculation, filters={'id':pe_pk}, tag='pe_workcalc')
+            q.append(ParameterData, output_of='pe_workcalc')
+            if len(q.all())>0:
+                resgas[gas] = q.all()[0][0]
+            # Check if the structure is present, porous (has 'isotherm_loading') and compute PE
+        if ('co2' in resgas.keys() and
+            'n2' in resgas.keys() and
+            'isotherm_loading' in resgas['co2'].get_dict() and
+            'isotherm_loading' in resgas['n2'].get_dict()):
+            porous = True
+            ResultPE = CalcPE(ResGasCO2=resgas['co2'],
+                              ResGasN2=resgas['n2'],
+                              GasIn=Str('coal'),
+                              VF=Float(0.35),
+                              Process=Str('TPSA'),
+                              Cp=Float(985.0),
+                              Yd=Float(0.99),
+                              ElEff=Str('carnot'),
+                              Opt=Str('PE'),
+                             )
+            printPE(structure_label,ResultPE.get_dict())
+        if not porous:
+            print("{}: not found or not porous".format(structure_label))
