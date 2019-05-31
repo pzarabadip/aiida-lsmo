@@ -57,7 +57,7 @@ def CalcPE(ResGasCO2, ResGasN2, GasIn, VF, Process, Cp, Yd, ElEff, Opt):
 df = pd.read_csv("../cof_test2/pk_final.csv")
 
 for i in df.index:
-    if (df.at[i,'extension_ok']==0) and (df.at[i,'note']=='still_running'):
+    if (df.at[i,'extension_ok']==0) and (df.at[i,'note']=='still_still_running'):
         structure_label = df.at[i,'structure']
         porous = False
         resgas = {}

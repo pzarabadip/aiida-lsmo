@@ -13,7 +13,7 @@ CifData = DataFactory('cif')
 
 df = pd.read_csv("../cof_test2/pk_final.csv")
 
-debug = False # print pk and if non-porous
+debug = True # print pk and if non-porous
 
 for i in df.index:
     structure_label = df.at[i,'structure']
