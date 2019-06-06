@@ -27,8 +27,8 @@ if not os.path.exists(dir_out):
 
 #header
 print("cof_label,", end="", file=ofile)
-print("co2_pe_label,co2_pe_pk,co2_poavf,co2_blocksph,co2_kh (mol/kg/Pa),co2_dev,", end="", file=ofile)
-print("n2_pe_label,n2_pe_pk,n2_poavf,n2_blocksph,n2_kh (mol/kg/Pa),n2_dev", end="\n", file=ofile)
+print("co2_pe_label,co2_pe.pk,co2_pe_out.pk,co2_poavf,co2_blocksph,co2_kh(mol/kg/Pa),co2_dev,", end="", file=ofile)
+print("n2_pe_label,n2_pe.pk,n2_pe_out.pk,n2_poavf,n2_blocksph,n2_kh(mol/kg/Pa),n2_dev", end="\n", file=ofile)
 
 for i in df.index:
     res_found={'co2':False,'n2':False}
@@ -58,6 +58,7 @@ for i in df.index:
             # initialize variables
             pe_pk = 404
             pe_res = None
+            pe_res_pk = None
             poavf=np.nan
             bs=np.nan
             kh=np.nan
@@ -72,8 +73,10 @@ for i in df.index:
                 q.append(ParameterData, edge_filters={'label': 'results'},
                                         output_of='pewc', tag='pe_res')
                 # Parse results
-                try:
-                    pe_res = q.all()[0][0].get_dict() # this will fail if (1) len(q.all)=0 or (2) last pe WC is not finished yet
+                try: # this will fail if (1) len(q.all)=0 or (2) last pe WC is not finished yet
+                    qall = q.all()[0][0]
+                    pe_res = qall.get_dict()
+                    pe_res_pk = qall.pk
                 except:
                     pass
                 if pe_res!=None: #existing results
@@ -109,7 +112,7 @@ for i in df.index:
                     ax[1].errorbar(h_avg, q_avg, xerr=h_dev,
                                    marker ="o",
                                    color= plotcolor[gas],)
-            print(*[pe_label,pe_pk,poavf,bs,kh,khdev], sep=",", end="", file=ofile)
+            print(*[pe_label,pe_pk,pe_res_pk,poavf,bs,kh,khdev], sep=",", end="", file=ofile)
             if gas=='co2':
                 print(end=",",file=ofile)
         # Both gas parsed: (1) print \n to .csv, (2) plot isotherms, (3) print status
