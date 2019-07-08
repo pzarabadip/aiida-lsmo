@@ -9,6 +9,7 @@ from aiida.plugins import CalculationFactory, DataFactory
 from aiida.orm import Code, Dict, Float, Int, Str
 from aiida.engine import submit
 from aiida.engine import ToContext, WorkChain, workfunction, if_
+from aiida_lsmo_workflows.utils.multiply_unitcell import multiply_unit_cell
 
 CifData = DataFactory('cif')
 ParameterData = DataFactory('dict')
@@ -48,6 +49,7 @@ class SeparationWorkChain(WorkChain):
         spec.input("raspa_code", valid_type=Code, required=False)
         spec.input("raspa_parameters", valid_type=ParameterData, required=False)
         #spec.input("raspa_usecharges", valid_type=bool, default=False, required=False)
+        spec.input("raspa_cutoff", valid_type=Float, default=Float(12.0), required=False)
         spec.input("raspa_minKh", valid_type=Float, default=Float(1e-10), required=False)
         spec.input("raspa_minKh_sel", valid_type=Float, default=Float(5.0), required=False)
         spec.input("raspa_verbosity", valid_type=Int, default=Int(10), required=False)
@@ -289,6 +291,10 @@ class SeparationWorkChain(WorkChain):
             self.ctx.raspa_parameters['Component'].pop('comp1')
         self.ctx.raspa_parameters['Component'][self.inputs.raspa_comp2.value] =\
             self.ctx.raspa_parameters['Component'].pop('comp2')
+
+        # cutoff = self.ctx.raspa_parameters['GeneralSettings']['CutOff']
+        ucs = multiply_unit_cell(self.inputs.structure, self.inputs.raspa_cutoff.value)
+        self.ctx.raspa_parameters['GeneralSettings']['UnitCells'] = "{} {} {}".format(ucs[0], ucs[1], ucs[2])
         #self.ctx.raspa_parameters['Component']['comp2'] = self.inputs.raspa_comp2.value
 
         # Turn on charges if requested
