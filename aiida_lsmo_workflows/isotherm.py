@@ -1,9 +1,9 @@
-from aiida.orm import CalculationFactory, DataFactory
-from aiida.orm.code import Code
-from aiida.orm.data.base import Float
-from aiida.work import workfunction as wf
-from aiida.work.run import submit
-from aiida.work.workchain import WorkChain, ToContext, while_, Outputs
+from aiida.plugins import CalculationFactory, DataFactory
+from aiida.orm import Code
+from aiida.orm import Float
+from aiida.engine import workfunction as wf
+from aiida.engine import run, submit
+from aiida.engine import WorkChain, ToContext, while_ #, OutputPort #The OutputPort should be checked.
 from copy import deepcopy
 
 # subworkflows
@@ -16,7 +16,7 @@ ZeoppCalculation = CalculationFactory('zeopp.network')
 ArrayData = DataFactory('array')
 CifData = DataFactory('cif')
 NetworkParameters = DataFactory('zeopp.parameters')
-ParameterData = DataFactory('parameter')
+ParameterData = DataFactory('dict')
 RemoteData = DataFactory('remote')
 StructureData = DataFactory('structure')
 
@@ -84,6 +84,7 @@ def get_zeopp_block_parameters(probe_radius):
     sigma = probe_radius.value
 
     params = {
+        #TODO: Change it to accept differet levels.
         'ha': True,
         'block': [sigma, 100],
     }
@@ -121,7 +122,7 @@ class Isotherm(WorkChain):
             cls.run_block_zeopp,          #computes sa, vol, povol, res, e chan, block pockets
             cls.init_raspa_calc,         #assign HeliumVoidFraction=POAV and UnitCells
             cls.run_henry_raspa,         #NumberOfInitializationCycles=0, remove ExternalPressure, WidomProbability=1
-            while_(cls.should_run_loading_raspa)( 
+            while_(cls.should_run_loading_raspa)(
                 cls.run_loading_raspa,   #for each P, recover the last snapshoot of the previous and run GCMC
                 cls.parse_loading_raspa,
             ),
@@ -169,14 +170,15 @@ class Isotherm(WorkChain):
         future = submit(ZeoppCalculation.process(), **inputs)
         self.report("pk: {} | Running zeo++ block volume calculation".format(
             future.pid))
-        return ToContext(zeopp_block=Outputs(future))
+        #return ToContext(zeopp_block=Outputs(future))
+        return ToContext(zeopp_block=future)
 
     def init_raspa_calc(self):
         """Parse the output of Zeo++ and instruct the input for Raspa. """
         # Use probe-occupiable available void fraction as the helium void fraction (for excess uptake)
         self.ctx.raspa_parameters['GeneralSettings']['HeliumVoidFraction'] = 0.0
         # Compute the UnitCells expansion considering the CutOff
-        cutoff = self.ctx.raspa_parameters['GeneralSettings']['CutOff']                           
+        cutoff = self.ctx.raspa_parameters['GeneralSettings']['CutOff']
         ucs = multiply_unit_cell(self.ctx.structure, cutoff)
         self.ctx.raspa_parameters['GeneralSettings']['UnitCells'] = "{} {} {}".format(ucs[0], ucs[1], ucs[2])
 
@@ -219,7 +221,8 @@ class Isotherm(WorkChain):
         running = submit(RaspaConvergeWorkChain, **inputs)
         self.report("pk: {} | Running raspa for the Henry coefficients".format(running.pid))
 
-        return ToContext(raspa_henry=Outputs(running))
+        #return ToContext(raspa_henry=Outputs(running))
+        return ToContext(raspa_henry=running)
 
     def should_run_loading_raspa(self):
         """We run another raspa calculation only if the current iteration is smaller than
@@ -253,7 +256,8 @@ class Isotherm(WorkChain):
         running = submit(RaspaConvergeWorkChain, **inputs)
         self.report("pk: {} | Running raspa for the pressure {} [bar]".format(running.pid, pressure/1e5))
         self.ctx.current_p_index += 1
-        return ToContext(raspa_loading=Outputs(running))
+        #return ToContext(raspa_loading=Outputs(running))
+        return ToContext(raspa_loading=running)
 
     def parse_loading_raspa(self):
         """Extract the pressure and loading average of the last completed raspa calculation"""
