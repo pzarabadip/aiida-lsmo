@@ -16,7 +16,7 @@
     ],
     "entry_points": {
         "aiida.workflows": [
-            "aiida_lsmo_workflows.separation_2comp=aiida_lsmo_workflows.separation_2comp:SeparationWorkChain"
+            "aiida_lsmo_workflows.isotherm_multi_comp=aiida_lsmo_workflows.isotherm_multi_comp:SeparationWorkChain"
             ]
     }
 }
