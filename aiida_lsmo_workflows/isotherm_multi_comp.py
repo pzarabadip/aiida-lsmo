@@ -6,10 +6,12 @@ import six
 from copy import deepcopy
 
 from aiida.plugins import CalculationFactory, DataFactory
-from aiida.orm import Code, Dict, Float, Int, Str
+from aiida.orm import Code, Dict, Float, Int, List, Str
 from aiida.engine import submit
-from aiida.engine import ToContext, WorkChain, workfunction, if_
+from aiida.engine import ToContext, WorkChain, workfunction, if_, while_
+
 from aiida_lsmo_workflows.utils.multiply_unitcell import multiply_unit_cell
+from aiida_lsmo_workflows.utils.pressure_points import choose_pressure_points
 
 CifData = DataFactory('cif')
 ParameterData = DataFactory('dict')
@@ -35,9 +37,6 @@ class SeparationWorkChain(WorkChain):
         that are generated in the process.
         """
         # General inputs
-        #spec.input_namespace('structure', valid_type=CifData, required=True, dynamic=True)
-        #spec.input('structure_zeopp', valid_type=CifData, required=True)
-        #spec.input_namespace('structure_zeopp', valid_type=CifData, required=False, dynamic=True)
         spec.input('structure', valid_type=CifData, required=True, help='Input structure in cif format')
         # Zeopp inputs
         spec.input('zeopp_code', valid_type=Code, required=False)
@@ -48,6 +47,8 @@ class SeparationWorkChain(WorkChain):
         # Raspa inputs
         spec.input("raspa_code", valid_type=Code, required=False)
         spec.input("raspa_parameters", valid_type=ParameterData, required=False)
+        spec.input("raspa_isotherm_dynamic", valid_type=bool, default=False, required=False, non_db=True)
+        spec.input("raspa_isotherm_full", valid_type=bool, default=False, required=False, non_db=True)
         #spec.input("raspa_usecharges", valid_type=bool, default=False, required=False)
         spec.input("raspa_cutoff", valid_type=Float, default=Float(12.0), required=False)
         spec.input("raspa_minKh", valid_type=Float, default=Float(1e-10), required=False)
@@ -60,8 +61,13 @@ class SeparationWorkChain(WorkChain):
         spec.input("raspa_comp1_mol_fraction", valid_type=Float, default=Float(0.2), required=False)
         spec.input("raspa_comp2", valid_type=Str, default=Str('krypton'), required=False)
         spec.input("raspa_comp2_mol_fraction", valid_type=Float, default=Float(0.8), required=False)
-        spec.input("raspa_pressure_low", valid_type=Float, default=Float(0.1), required=False)
-        spec.input("raspa_pressure_high", valid_type=Float, default=Float(1.0), required=False)
+        spec.input("raspa_pressure_min", valid_type=Float, default=Float(0.1), required=False)
+        spec.input("raspa_pressure_max", valid_type=Float, default=Float(1.0), required=False)
+        # TODO: Here we need to decide for different compoentns
+        spec.input("raspa_molsatdens", valid_type=Float, required=False)
+        spec.input("raspa_gcmc_press_precision", valid_type=Float, required=False)
+        spec.input("raspa_gcmc_press_maxstep", valid_type=Float, required=False)
+        spec.input("selected_pressures", valid_type=list, required=False, non_db=True)
 
         # Zeopp Extra Inputs
         spec.input("zeopp_accuracy", valid_type=Str, default=Str('DEF'), required=False)
@@ -92,10 +98,10 @@ class SeparationWorkChain(WorkChain):
                 cls.run_raspa_widom),
                 if_(cls.should_run_gcmc)(
                     cls.init_raspa_gcmc,
-                    cls.run_raspa_gcmc_low,
-                    cls.parse_raspa_gcmc,
-                    cls.run_raspa_gcmc_high,
-                    cls.parse_raspa_gcmc,
+                    while_(cls.should_run_another_gcmc)(
+                            cls.run_raspa_gcmc,
+                            cls.parse_raspa_gcmc,
+                    ),
                 ),
             cls.return_results,
             )
@@ -128,17 +134,13 @@ class SeparationWorkChain(WorkChain):
         }
 
         #TODO: Adding zeopp parameters too.
-        self.ctx.raspa_pressure_low = self.inputs.raspa_pressure_low
-        self.ctx.raspa_pressure_high = self.inputs.raspa_pressure_high
+        self.ctx.raspa_pressure_min = self.inputs.raspa_pressure_min
+        self.ctx.raspa_pressure_max = self.inputs.raspa_pressure_max
         self.ctx.raspa_comp1 = self.inputs.raspa_comp1
         self.ctx.raspa_comp2 = self.inputs.raspa_comp2
         self.ctx.raspa_comp1_mol_fraction = self.inputs.raspa_comp1_mol_fraction
         self.ctx.raspa_comp2_mol_fraction = self.inputs.raspa_comp2_mol_fraction
         self.ctx.raspa_num_of_components = self.inputs.raspa_num_of_components
-        self.ctx.loading_low = []
-        # self.ctx.loading_low_comp2 = []
-        self.ctx.loading_high = []
-        # self.ctx.loading_high_comp2 = []
 
     def run_pore_dia_zeopp(self):
         """
@@ -183,8 +185,8 @@ class SeparationWorkChain(WorkChain):
         """
         lcd_lim = self.inputs.zeopp_lcd_max.value
         pld_lim = self.inputs.zeopp_pld_min.value
-        lcd_current = self.ctx.zeopp_res.get_outgoing().get_node_by_label('output_parameters').get_dict()['Largest_included_sphere']
-        pld_current = self.ctx.zeopp_res.get_outgoing().get_node_by_label('output_parameters').get_dict()['Largest_free_sphere']
+        lcd_current = self.ctx.zeopp_res.outputs.output_parameters.get_dict()['Largest_included_sphere']
+        pld_current = self.ctx.zeopp_res.outputs.output_parameters.get_dict()['Largest_free_sphere']
 
         if (lcd_current < lcd_lim) and (pld_current > pld_lim):
             self.report("This is a suitable structure for further investigation")
@@ -204,6 +206,7 @@ class SeparationWorkChain(WorkChain):
                 'volpo': [self.inputs.zeopp_probe_radius.value,
                           self.inputs.zeopp_probe_radius.value,
                           self.inputs.zeopp_volpo_samples_UC.value],
+                #TODO: Giving the choice to user!
                 'ha'   :  self.inputs.zeopp_accuracy.value
         }
 
@@ -294,10 +297,8 @@ class SeparationWorkChain(WorkChain):
         self.ctx.raspa_parameters['Component'][self.inputs.raspa_comp2.value] =\
             self.ctx.raspa_parameters['Component'].pop('comp2')
 
-        # cutoff = self.ctx.raspa_parameters['GeneralSettings']['CutOff']
         ucs = multiply_unit_cell(self.inputs.structure, self.inputs.raspa_cutoff.value)
         self.ctx.raspa_parameters['GeneralSettings']['UnitCells'] = "{} {} {}".format(ucs[0], ucs[1], ucs[2])
-        #self.ctx.raspa_parameters['Component']['comp2'] = self.inputs.raspa_comp2.value
 
         # Turn on charges if requested
         # if self.inputs.raspa_usecharges:
@@ -373,6 +374,7 @@ class SeparationWorkChain(WorkChain):
 
         #TODO: make it more comprehensive to flag possible selectivity inversion.
         if Kh_sel > self.inputs.raspa_minKh_sel.value:
+            self.ctx.kh_for_iso = Kh_comp1
             self.report("Ideal selectivity larger than the threshold: compute binary loading")
             return True
         else:
@@ -381,10 +383,48 @@ class SeparationWorkChain(WorkChain):
 
     def init_raspa_gcmc(self):
         """
-        Initialization of input for raspa gcmc
+        Initialization of input for raspa gcmc.
+        It generates a pressure list based on our decision.
+        1 - Full isotherm simulation based on Daniele work.
+        2 - Partial isotherm simulation.
         """
-        #self.ctx.raspa_parameters = deepcopy(self.inputs.raspa_parameters.get_dict())
-        # Don't we need to make another deepcopy here too?
+        # Initializate counter and set restart to None
+        self.ctx.current_p_index = 0
+        # self.ctx.restart_raspa_calc = None
+
+        if (self.inputs.raspa_isotherm_dynamic) and (self.inputs.raspa_isotherm_full):
+            # Estimate the total loading qsat and choose the pressure points
+            satDens = self.inputs.raspa_molsatdens.value #(mol/l)
+            poreVol = self.ctx.zeopp_sv.outputs.output_parameters.get_dict()['POAV_cm^3/g'] #(cm3/g = l/kg)
+            self.ctx.estimated_qsat = satDens * poreVol
+            self.ctx.pressures = choose_pressure_points(
+                # It currently takes the greatest henry coefficient.
+                Kh = self.ctx.kh_for_iso, #(mol/kg/Pa)
+                qst = self.ctx.estimated_qsat, #(mol/kg_frame)
+                dpa = self.inputs.raspa_gcmc_press_precision.value, #(kg*Pa/mol)
+                dpmax = self.inputs.raspa_gcmc_press_maxstep.value, #(Pa)
+                pmax = self.inputs.raspa_pressure_max.value, #(Pa)
+                pmin = self.inputs.raspa_pressure_min.value, #(Pa)
+                dynamic = self.inputs.raspa_isotherm_dynamic,
+                full = self.inputs.raspa_isotherm_full,
+                )
+        elif (not self.inputs.raspa_isotherm_dynamic) and (self.inputs.raspa_isotherm_full):
+            self.ctx.pressures = choose_pressure_points(
+                pmin = self.self.inputs.raspa_pressure_min.value,
+                dpa = self.inputs.raspa_gcmc_press_precision.value,
+                pmax = self.inputs.raspa_pressure_max.value,
+                dynamic = self.inputs.raspa_isotherm_dynamic,
+                full = self.inputs.raspa_isotherm_full,
+            )
+        else:
+            self.ctx.pressures = choose_pressure_points(
+                selected_pressures = self.inputs.selected_pressures,
+                dynamic = self.inputs.raspa_isotherm_dynamic,
+                full = self.inputs.raspa_isotherm_full,
+            )
+
+        self.report("{} number of points are chosen for isotherm construction".format(len(self.ctx.pressures)))
+
         # CORRECT the parameters to perform GCMC
         self.ctx.raspa_parameters["GeneralSettings"]["NumberOfInitializationCycles"] = self.inputs.raspa_parameters.get_dict()["GeneralSettings"]["NumberOfInitializationCycles"]
         self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"] = self.inputs.raspa_parameters.get_dict()["GeneralSettings"]["NumberOfCycles"]
@@ -396,7 +436,6 @@ class SeparationWorkChain(WorkChain):
         #
         self.ctx.raspa_parameters["Component"][self.ctx.raspa_comp1.value]["MolFraction"] = float(self.ctx.raspa_comp1_mol_fraction.value)
         del self.ctx.raspa_parameters["Component"][self.ctx.raspa_comp1.value]["WidomProbability"]
-        # self.ctx.raspa_parameters["Component"][self.ctx.raspa_comp1.value]["WidomProbability"] = 0.0
         self.ctx.raspa_parameters["Component"][self.ctx.raspa_comp1.value]["TranslationProbability"] = 0.5
         self.ctx.raspa_parameters["Component"][self.ctx.raspa_comp1.value]["RotationProbability"] = 0.5
         self.ctx.raspa_parameters["Component"][self.ctx.raspa_comp1.value]["ReinsertionProbability"] = 0.5
@@ -406,7 +445,6 @@ class SeparationWorkChain(WorkChain):
         # self.ctx.raspa_parameters["Component"][self.ctx.raspa_comp1.value]["IdentityChangeList"] = '0 1'
         self.ctx.raspa_parameters["Component"][self.ctx.raspa_comp1.value]["SwapProbability"] = 1.0
         # Component 2
-        # TODO: use del to delete the WidomProbability value?
         self.ctx.raspa_parameters["Component"][self.ctx.raspa_comp2.value]["MolFraction"] = float(self.ctx.raspa_comp2_mol_fraction.value)
         del self.ctx.raspa_parameters["Component"][self.ctx.raspa_comp2.value]["WidomProbability"]
         self.ctx.raspa_parameters["Component"][self.ctx.raspa_comp2.value]["TranslationProbability"] = 0.5
@@ -418,13 +456,21 @@ class SeparationWorkChain(WorkChain):
         self.ctx.raspa_parameters["Component"][self.ctx.raspa_comp2.value]["SwapProbability"] = 1.0
         return
 
-    def run_raspa_gcmc_low(self):
+    def should_run_another_gcmc(self):
+        """
+        We run another raspa calculation only if the current iteration is
+        smaller than the total number of pressures we want to compute.
+        """
+        return self.ctx.current_p_index < len(self.ctx.pressures)
+
+
+    def run_raspa_gcmc(self):
         """
         It runs a binary GCMC calculation at T and lower pressure.
         """
 
-        self.ctx.raspa_parameters['System']['hkust1']['ExternalPressure'] = (self.ctx.raspa_pressure_low) * 1e5
-
+        pressure = self.ctx.pressures[self.ctx.current_p_index]
+        self.ctx.raspa_parameters['System']['hkust1']['ExternalPressure'] = pressure
         # Create the input dictionary
         inputs = {
             'framework'  : {'hkust1':self.inputs.structure},
@@ -437,7 +483,6 @@ class SeparationWorkChain(WorkChain):
             }
         }
 
-
         # Check if there are poket blocks to be loaded
         # Needs to be revised.
         #if self.ctx.number_blocking_spheres > 0:
@@ -445,109 +490,53 @@ class SeparationWorkChain(WorkChain):
 
 
         # Create the calculation process and launch it
-        gcmc_low = self.submit(RaspaCalculation, **inputs)
-        self.report("pk: {} | Running Raspa GCMC at low pressure".format(gcmc_low.pk))
-        # self.report("pk: {} | Running Raspa GCMC at p(bar)={:.3f}").format(gcmc_low.pk, self.ctx.raspa_pressure_low/1e5)
-        return ToContext(raspa_gcmc_low=gcmc_low)
-
-    def run_raspa_gcmc_high(self):
-        """Run a GCMC calculation in Raspa @ T,P_high """
-
-        self.ctx.raspa_parameters['System']['hkust1']['ExternalPressure'] = (self.ctx.raspa_pressure_high) * 1e5
-        # pressure = self.ctx.raspa_pressure_high
-        # self.ctx.raspa_parameters['GeneralSettings']['ExternalPressure'] = pressure
-
-        # Create the input dictionary
-
-        inputs = {
-            'framework'  : {'hkust1':self.inputs.structure},
-            #'hkust1'     : self.inputs.structure_raspa,
-            'code'       : self.inputs.raspa_code,
-            'parameters' : ParameterData(dict=self.ctx.raspa_parameters).store(),
-            'metadata'  :{
-                'options':  self.ctx.raspa_options,
-                'label'  : 'RASPA GCMC High Pressure',
-            }
-        }
-
-        # Check if there are poket blocks to be loaded
-        # Needs to be revised.
-        #if self.ctx.number_blocking_spheres > 0:
-        #    inputs['block_component_0'] = self.ctx.zeopp['block']
-
-
-        # Create the calculation process and launch it
-        gcmc_high = self.submit(RaspaCalculation, **inputs)
-        self.report("pk: {} | Running Raspa GCMC at high pressure".format(gcmc_high.pk))
-        # self.report("pk: {} | Running Raspa GCMC at p(bar)={:.3f}").format(gcmc_high.pk, self.ctx.raspa_pressure_high/1e5)
-        return ToContext(raspa_gcmc_high=gcmc_high)
+        gcmc = self.submit(RaspaCalculation, **inputs)
+        self.report("pk: {} | Running Raspa GCMC at p(bar)={:.3f} ({} of {})".format(gcmc.pk, pressure/1e5, self.ctx.current_p_index+1, len(self.ctx.pressures)))
+        return ToContext(raspa_gcmc=gcmc)
 
     def parse_raspa_gcmc(self):
         """
         Extract the pressure and loading average of the last completed raspa
         calculation.
         """
+        if self.ctx.current_p_index == 0:
+            self.ctx.isotherm_loading_comp1 = []
+            self.ctx.isotherm_loading_comp2 = []
+            self.ctx.isotherm_enthalpy = []
+
 
         pressure = self.ctx.raspa_parameters['System']['hkust1']['ExternalPressure']/1e5
-        # output_gcmc_low = self.ctx.raspa_gcmc_low.outputs.output_parameters.get_dict()
-        # output_gcmc_high = self.ctx.raspa_gcmc_high.outputs.output_parameters.get_dict()
-        # conv1 = output_gcmc_low['hkust1']['components'][self.inputs.raspa_comp1.value]['conversion_factor_molec_uc_to_mol_kg']
-        # Store results
-        # TODO: Here I can avoid spliting into low and high pressure. Instead, performing
-        # parsin after completion of raspa_run. I can update the pressure. Inspired from
-        # isotherm workflow. Then, it can simply become the full isotherm workchain.
-        # Indeed, I can merge all raspa_calcs into one. Then, I can define a new input
-        # as full isotherm or limited points. If full isotherms, it will compute full isotherms based on
-        # a outline decision. If not, it will run simulation at selected number of pressures.
-        if pressure == self.ctx.raspa_pressure_low.value:
-            output_gcmc_low = self.ctx.raspa_gcmc_low.outputs.output_parameters.get_dict()
-            conv1 = output_gcmc_low['hkust1']['components'][self.inputs.raspa_comp1.value]['conversion_factor_molec_uc_to_mol_kg']
-            loading_average_comp1_low = conv1 * output_gcmc_low['hkust1']['components'][self.inputs.raspa_comp1.value]['loading_absolute_average']
-            loading_average_comp2_low = conv1 * output_gcmc_low['hkust1']['components'][self.inputs.raspa_comp2.value]['loading_absolute_average']
-            loading_dev_comp1_low = conv1 * output_gcmc_low['hkust1']['components'][self.inputs.raspa_comp1.value]['loading_absolute_dev']
-            loading_dev_comp2_low = conv1 * output_gcmc_low['hkust1']['components'][self.inputs.raspa_comp2.value]['loading_absolute_dev']
-            self.ctx.loading_low.append((pressure, loading_average_comp1_low, loading_dev_comp1_low, loading_average_comp2_low, loading_dev_comp2_low))
-            # self.ctx.loading_low_comp2.append((pressure, loading_average_comp2_low, loading_dev_comp2_low))
-        elif pressure == self.ctx.raspa_pressure_high.value:
-            output_gcmc_high = self.ctx.raspa_gcmc_high.outputs.output_parameters.get_dict()
-            conv1 = output_gcmc_high['hkust1']['components'][self.inputs.raspa_comp1.value]['conversion_factor_molec_uc_to_mol_kg']
-            loading_average_comp1_high = conv1 * output_gcmc_high['hkust1']['components'][self.inputs.raspa_comp1.value]['loading_absolute_average']
-            loading_average_comp2_high = conv1 * output_gcmc_high['hkust1']['components'][self.inputs.raspa_comp2.value]['loading_absolute_average']
-            loading_dev_comp1_high = conv1 * output_gcmc_high['hkust1']['components'][self.inputs.raspa_comp1.value]['loading_absolute_dev']
-            loading_dev_comp2_high = conv1 * output_gcmc_high['hkust1']['components'][self.inputs.raspa_comp2.value]['loading_absolute_dev']
-            self.ctx.loading_high.append((pressure, loading_average_comp1_high, loading_dev_comp1_high,loading_average_comp2_high, loading_dev_comp2_high))
-            # self.ctx.loading_high_comp2.append((pressure, loading_average_comp2_high, loading_dev_comp2_high))
-        else:
-            raise TypeError("Could not find any calculated loading!")
+        output_gcmc = self.ctx.raspa_gcmc.outputs.output_parameters.get_dict()
+        conv1 = output_gcmc['hkust1']['components'][self.inputs.raspa_comp1.value]['conversion_factor_molec_uc_to_mol_kg']
 
-        # self.ctx.loading_low.append((pressure, loading_average_comp1_low, loading_dev_comp1_low, loading_average_comp2_low, loading_dev_comp2_low))
-        # self.ctx.loading_high.append((pressure, loading_average_comp1_high, loading_dev_comp1_high, loading_average_comp2_high, loading_dev_comp2_high))
-        return
+        try:
+            loading_average_comp1 = conv1 * output_gcmc['hkust1']['components'][self.inputs.raspa_comp1.value]['loading_absolute_average']
+            loading_average_comp2 = conv1 * output_gcmc['hkust1']['components'][self.inputs.raspa_comp2.value]['loading_absolute_average']
+            loading_dev_comp1 = conv1 * output_gcmc['hkust1']['components'][self.inputs.raspa_comp1.value]['loading_absolute_dev']
+            loading_dev_comp2 = conv1 * output_gcmc['hkust1']['components'][self.inputs.raspa_comp2.value]['loading_absolute_dev']
+        except TypeError:
+            loading_average_comp1 = None
+            loading_average_comp2 = None
+            loading_dev_comp1 = None
+            loading_dev_comp2 = None
 
-        #conv2 = 1/120.273 # K to kJ/mol
+        conv2 = 1/120.273 # K to kJ/mol
+        try:
+            enthalpy_of_adsorption = conv2 * output_gcmc['hkust1']['general']['enthalpy_of_adsorption_average']
+            enthalpy_of_adsorption_dev = conv2 * output_gcmc['hkust1']['general']['enthalpy_of_adsorption_dev']
+        except TypeError:
+            enthalpy_of_adsorption = None
+            enthalpy_of_adsorption_dev = None
 
-        #TODO I need to check the aiida-raspa plugin to check how these are stored. For now comment out.
-        # if pressure == self.ctx.raspa_pressure_low:
-        #     enthalpy_of_adsorption_comp0_low = conv2 * self.ctx.raspa_gcmc_low["component_0"].get_dict()['loading_absolute_average']
-        #     enthalpy_of_adsorption_comp1_low = conv2 * self.ctx.raspa_gcmc_low["component_1"].get_dict()['loading_absolute_average']
-        #     enthalpy_of_adsorption_dev_comp0_low = conv2 * self.ctx.raspa_gcmc_low["component_0"].get_dict()['loading_absolute_dev']
-        #     enthalpy_of_adsorption_dev_comp1_low = conv2 * self.ctx.raspa_gcmc_low["component_1"].get_dict()['loading_absolute_dev']
-        # elif pressure == self.ctx.raspa_pressure_high:
-        #     enthalpy_of_adsorption_comp0_high = conv2 * self.ctx.raspa_gcmc_high["component_0"].get_dict()['loading_absolute_average']
-        #     enthalpy_of_adsorption_average_comp1_high = conv2 * self.ctx.raspa_gcmc_high["component_1"].get_dict()['loading_absolute_average']
-        #     enthalpy_of_adsorption_dev_comp0_high = conv2 * self.ctx.raspa_gcmc_high["component_0"].get_dict()['loading_absolute_dev']
-        #     enthalpy_of_adsorption_dev_comp1_high = conv2 * self.ctx.raspa_gcmc_high["component_1"].get_dict()['loading_absolute_dev']
-        # else:
-        #     raise TypeError, "Could not find any calculated loading!"
+        self.ctx.isotherm_loading_comp1.append((pressure, loading_average_comp1, loading_dev_comp1))
+        self.ctx.isotherm_loading_comp2.append((pressure, loading_average_comp2, loading_dev_comp2))
+        self.ctx.isotherm_enthalpy.append((pressure, enthalpy_of_adsorption, enthalpy_of_adsorption_dev))
 
-
-        #self.ctx.isotherm_enthalpy.append((pressure, enthalpy_of_adsorption, enthalpy_of_adsorption_dev))
 
         # Update counter and parent folder for restart
-        #self.ctx.current_p_index += 1
-        #self.ctx.restart_raspa_calc = self.ctx.raspa_gcmc['retrieved_parent_folder']
-        #return
-
+        self.ctx.current_p_index += 1
+        # self.ctx.restart_raspa_calc = self.ctx.raspa_gcmc['retrieved_parent_folder']
+        return
 
     # This part also needs a revision! I should double check the parsers.
     def return_results(self):
@@ -560,6 +549,8 @@ class SeparationWorkChain(WorkChain):
         result_dict['henry_coefficient_dev'] = {}
         result_dict['adsorption_energy_average'] = {}
         result_dict['adsorption_energy_dev'] = {}
+        result_dict['isotherm_loading'] = {}
+        result_dict['isotherm_enthalpy'] = {}
 
         # Zeopp section
         output_zeo = self.ctx.zeopp_sv.outputs.output_parameters.get_dict()
@@ -598,16 +589,6 @@ class SeparationWorkChain(WorkChain):
             # Temperature
             result_dict['temperature'] = self.ctx.raspa_parameters["System"]['hkust1']["ExternalTemperature"]
             result_dict['temperature_unit'] = "K"
-            # Component 1 - Single keys for each component
-            # result_dict['henry_coefficient_average_' + self.ctx.raspa_comp1.value] = comp1['henry_coefficient_average']
-            # result_dict['henry_coefficient_dev_' + self.ctx.raspa_comp1.value] = comp1['henry_coefficient_dev']
-            # result_dict['adsorption_energy_average_' + self.ctx.raspa_comp1.value] = comp1['adsorption_energy_widom_average']
-            # result_dict['adsorption_energy_dev_' + self.ctx.raspa_comp1.value] = comp1['adsorption_energy_widom_dev']
-            # Component 2
-            # result_dict['henry_coefficient_average_' + self.ctx.raspa_comp2.value] = comp2['henry_coefficient_average']
-            # result_dict['henry_coefficient_dev_' + self.ctx.raspa_comp2.value] = comp2['henry_coefficient_dev']
-            # result_dict['adsorption_energy_average_' + self.ctx.raspa_comp2.value] = comp2['adsorption_energy_widom_average']
-            # result_dict['adsorption_energy_dev_' + self.ctx.raspa_comp2.value] = comp2['adsorption_energy_widom_dev']
 
             # Results as nested dictionary
             result_dict['henry_coefficient_average'][self.ctx.raspa_comp1.value] = comp1['henry_coefficient_average']
@@ -625,42 +606,17 @@ class SeparationWorkChain(WorkChain):
         except AttributeError:
             pass
 
-        # Raspa GCMC section
-        # It should not work in this form. I need to make the workchain working and then fine tune this section.
-        # selectivty = (loading_average_comp1_high / loading_average_comp2_high) / (self.ctx.raspa_comp2_mol_fraction / self.ctx.raspa_comp1_mol_fraction)
-        # output_gcmc_low = self.ctx.raspa_gcmc_low.outputs.output_parameters.get_dict()
-        # output_gcmc_high = self.ctx.raspa_gcmc_high.outputs.output_parameters.get_dict()
-        # comp1_gcmc_low = output_gcmc_low['hkust1']['components'][self.ctx.raspa_comp1.value]
-        # comp2_gcmc_low = output_gcmc_low['hkust1']['components'][self.ctx.raspa_comp2.value]
-        # comp1_gcmc_high = output_gcmc_high['hkust1']['components'][self.ctx.raspa_comp1.value]
-        # comp2_gcmc_high = output_gcmc_high['hkust1']['components'][self.ctx.raspa_comp2.value]
         try:
-            result_dict['isotherm_loading_header'] = {}
-            # result_dict['loading_low'] = {}
-            # result_dict['loading_high'] = {}
             result_dict['loading'] = {}
             result_dict['isotherm_loading_header'] = ['Pressure(bar)', 'Loading_average(mol/kg)', 'Loading_deviation(mol/kg)']
+            result_dict['isotherm_loading'][self.ctx.raspa_comp1.value] = self.ctx.isotherm_loading_comp1
+            result_dict['isotherm_loading'][self.ctx.raspa_comp2.value] = self.ctx.isotherm_loading_comp2
+            result_dict['isotherm_enthalpy_header'] = ['Pressure(bar)', 'Enthalpy_of_adsorption_average(kJ/mol)', 'Enthalpy_of_adsorption_deviation(kJ/mol)']
+            result_dict['isotherm_enthalpy'] = self.ctx.enthalpy_of_adsorption
+            result_dict['conversion_factor_molec_uc_to_cm3stp_cm3'] = output_gcmc['hkust1']['components'][self.inputs.raspa_comp1.value]['conversion_factor_molec_uc_to_cm3stp_cm3']
+            result_dict['conversion_factor_molec_uc_to_gr_gr'] = output_gcmc['hkust1']['components'][self.inputs.raspa_comp1.value]['conversion_factor_molec_uc_to_gr_gr']
+            result_dict['conversion_factor_molec_uc_to_mol_kg'] = output_gcmc['hkust1']['components'][self.inputs.raspa_comp1.value]['conversion_factor_molec_uc_to_mol_kg']
 
-            # result_dict['loading'] = type(self.ctx.loading_low)
-            # result_dict['loading'] = type(list(self.ctx.loading_low))
-
-            # result_dict['loading'][self.ctx.raspa_comp1.value] = (self.ctx.loading_low[0], self.ctx.loading_low[1],self.ctx.loading_low[2])
-            # result_dict['loading'][self.ctx.raspa_comp2.value] = (self.ctx.loading_low[0], self.ctx.loading_low[3],self.ctx.loading_low[4])
-            # result_dict['loading'][self.ctx.raspa_comp1.value] = (self.ctx.loading_high[0], self.ctx.loading_high[1],self.ctx.loading_high[2])
-            # result_dict['loading'][self.ctx.raspa_comp2.value] = (self.ctx.loading_high[0], self.ctx.loading_high[3],self.ctx.loading_high[4])
-            # result_dict['loading'][self.ctx.raspa_comp2.value]
-            # result_dict['loading_low'][self.ctx.raspa_comp1.value] = self.ctx.loading_low_comp1[0:3]
-            # result_dict['loading_low'][self.ctx.raspa_comp2.value] = self.ctx.loading_low_comp1[0:3]
-            # result_dict['loading_low'][self.ctx.raspa_comp2.value] = self.ctx.loading_low_comp2
-            # result_dict['loading_high'][self.ctx.raspa_comp1.value] = self.ctx.loading_high_comp1
-            # result_dict['loading_high'][self.ctx.raspa_comp2.value] = self.ctx.loading_high_comp2
-            #self.ctx.raspa_gcmc_selectivity.append()
-            #result_dict['selectivity_gcmc'] =
-            #result_dict['isotherm_enthalpy_header'] = ['Pressure(bar)', 'Enthalpy_of_adsorption_average(kJ/mol)', 'Enthalpy_of_adsorption_deviation(kJ/mol)']
-            #result_dict['isotherm_enthalpy'] = self.ctx.isotherm_enthalpy
-            #result_dict['conversion_factor_molec_uc_to_cm3stp_cm3'] = self.ctx.raspa_gcmc["component_0"].get_dict()['conversion_factor_molec_uc_to_cm3stp_cm3']
-            #result_dict['conversion_factor_molec_uc_to_gr_gr'] = self.ctx.raspa_gcmc["component_0"].get_dict()['conversion_factor_molec_uc_to_gr_gr']
-            #result_dict['conversion_factor_molec_uc_to_mol_kg'] = self.ctx.raspa_gcmc["component_0"].get_dict()['conversion_factor_molec_uc_to_mol_kg']
         except AttributeError:
             pass
 

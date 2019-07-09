@@ -1,4 +1,4 @@
-def choose_pressure_points(Kh, qsat, dpa, dpmax, pmax):
+def choose_pressure_points(**kwargs):
     """Model the isotherm as single-site langmuir and return the most important
     pressure points to evaluate for an isotherm. Returns a list of pressures.
 
@@ -8,29 +8,43 @@ def choose_pressure_points(Kh, qsat, dpa, dpmax, pmax):
     :param dpmax: maximum distance between two pressure points (Pa)
     :param pmax: max pressure to sample (Pa)
     """
-    R = 8.314/1000 #(kJ/mol/K)
-    b = Kh/qsat #(1/Pa)
-    pmin = 0.001e5 #(Pa)
-    p = [pmin]
-    while True:
-        pold = p[-1]
-        dp = min(dpmax,dpa*(b*pold**2+2*pold+1/b))
-        pnew = pold+dp
-        if pnew <= pmax:
-            p.append(pnew)
-        else:
-            p.append(pmax)
-            return p
+    dynamic = kwargs.pop('dynamic')
+    full = kwargs.pop('full')
 
-@workfunction
-def update_raspa_parameters(parameters, pressure):
-    """Store input parameters of Raspa for given pressure.
 
-    Note: In order to keep the provenance of both Raspa calculations,
-    changing the pressure force us to create a new ParameterData node.
-    "workfunctions" will take care of linking the user-provided ParameterData
-    node to the new one containing the pressure.
-    """
-    param_dict = parameters.get_dict()
-    param_dict['GeneralSettings']['ExternalPressure'] = pressure.value
-    return ParameterData(dict=param_dict)
+    if dynamic and full:
+        Kh = kwargs.pop('Kh')
+        qst = kwargs.pop('qsat')
+        dpmax - kwargs.pop('dpmax')
+        pmin = kwargs.pop('pmin')
+        dpa = kwargs.pop('dpa')
+        pmax = kwargs.pop('pmax')
+        R = 8.314/1000 #(kJ/mol/K)
+        b = Kh/qsat #(1/Pa)
+        # pmin = 0.001e5 #(Pa)
+        p = [pmin]
+        while True:
+            pold = p[-1]
+            dp = min(dpmax,dpa*(b*pold**2+2*pold+1/b))
+            pnew = pold+dp
+            if pnew <= pmax:
+                p.append(pnew)
+            else:
+                p.append(pmax)
+                return p
+    elif (not dynamic) and full:
+        pmin = kwargs.pop('pmin')
+        dpa = kwargs.pop('dpa')
+        pmax = kwargs.pop('pmax')
+        p = [pmin]
+        while True:
+            pold = p[-1]
+            pnew = pold + dpa
+            if pnew < pmax:
+                p.append(pnew)
+            else:
+                p.append(pmax)
+                return p
+    else:
+        p = kwargs.pop('selected_pressures')
+        return p
