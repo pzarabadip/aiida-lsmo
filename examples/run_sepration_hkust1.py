@@ -36,7 +36,6 @@ raspa_parameters = Dict(
         "System": {
             "hkust1": {
                 "type": "Framework",
-                "UnitCells": "1 1 1",
                 "HeliumVoidFraction": 0.149,
                 "ExternalTemperature": 300.0,
                 "ExternalPressure": 1e5,
