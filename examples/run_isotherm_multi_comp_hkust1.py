@@ -10,7 +10,7 @@ CifData = DataFactory('cif')
 
 # Import the structure
 structure = CifData(file=os.path.abspath("./HKUST1.cif"))
-structure.label = "hkust1"
+structure.label = structure.filename.lower()[:-4]
 
 # Zeopp settings
 zeopp_code = Code.get_from_string('zeo++@ovan')

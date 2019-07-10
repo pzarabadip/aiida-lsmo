@@ -2,6 +2,7 @@
 Selectivity and Working Capacity WorkChain
 """
 from __future__ import absolute_import
+import os
 import six
 from copy import deepcopy
 
@@ -79,6 +80,7 @@ class SeparationWorkChain(WorkChain):
         #Workflow
         # spec.outline(
         #     cls.setup,
+        #     cls.run_pore_dia_zeopp,
         #     cls.init_raspa_widom,
         #     cls.run_raspa_widom,
         #     cls.init_raspa_gcmc,
@@ -91,19 +93,19 @@ class SeparationWorkChain(WorkChain):
             #cls.run_raspa_widom,
             if_(cls.should_run_zeopp_volpo)(
                 cls.run_savolpo_zeopp,
-                 # if_(cls.should_run_zeopp_block)(
-                 #    cls.run_block_zeopp,
-                 # ),
+                 if_(cls.should_run_zeopp_block)(
+                    cls.run_block_zeopp,
+                 ),
                 cls.init_raspa_widom,
                 cls.run_raspa_widom),
-                if_(cls.should_run_gcmc)(
-                    cls.init_raspa_gcmc,
-                    while_(cls.should_run_another_gcmc)(
-                            cls.run_raspa_gcmc,
-                            cls.parse_raspa_gcmc,
-                    ),
-                ),
-            cls.return_results,
+            #     if_(cls.should_run_gcmc)(
+            #         cls.init_raspa_gcmc,
+            #         while_(cls.should_run_another_gcmc)(
+            #                 cls.run_raspa_gcmc,
+            #                 cls.parse_raspa_gcmc,
+            #         ),
+            #     ),
+            # cls.return_results,
             )
 
 
@@ -148,7 +150,7 @@ class SeparationWorkChain(WorkChain):
         """
         # Required inputs
         params = {
-            'res' : True,
+            'res' : [self.inputs.structure.label + '.res'],
             'ha'  : self.inputs.zeopp_accuracy.value
         }
 
@@ -202,11 +204,12 @@ class SeparationWorkChain(WorkChain):
         params = {
                 'sa'   : [self.inputs.zeopp_probe_radius.value,
                           self.inputs.zeopp_probe_radius.value,
-                          self.inputs.zeopp_block_samples_A3.value],
+                          self.inputs.zeopp_block_samples_A3.value,
+                          self.inputs.structure.label + '.sa'],
                 'volpo': [self.inputs.zeopp_probe_radius.value,
                           self.inputs.zeopp_probe_radius.value,
-                          self.inputs.zeopp_volpo_samples_UC.value],
-                #TODO: Giving the choice to user!
+                          self.inputs.zeopp_volpo_samples_UC.value,
+                          self.inputs.structure.label + '.volpo'],
                 'ha'   :  self.inputs.zeopp_accuracy.value
         }
 
@@ -255,9 +258,14 @@ class SeparationWorkChain(WorkChain):
         """
         It calculates the block pockets only on structures with non-accessible void fraction.
         """
+        # self.ctx.block_filename = '_'.join((self.inputs.structure.label, self.inputs.raspa_comp1.value, str(self.inputs.zeopp_probe_radius.value)))
+
+        self.ctx.block_filename = '_'.join((self.inputs.structure.label, self.inputs.raspa_comp1.value))
+
         params = {
                 'block': [self.inputs.zeopp_probe_radius.value,
-                          self.inputs.zeopp_block_samples_A3.value],
+                          self.inputs.zeopp_block_samples_A3.value,
+                          self.ctx.block_filename + '.block'],
                 'ha'   : self.inputs.zeopp_accuracy.value
         }
 
@@ -300,6 +308,9 @@ class SeparationWorkChain(WorkChain):
         ucs = multiply_unit_cell(self.inputs.structure, self.inputs.raspa_cutoff.value)
         self.ctx.raspa_parameters['GeneralSettings']['UnitCells'] = "{} {} {}".format(ucs[0], ucs[1], ucs[2])
 
+        # Adding block files:
+        # We check if
+
         # Turn on charges if requested
         # if self.inputs.raspa_usecharges:
         #     self.ctx.raspa_parameters['GeneralSettings']['ChargeMethod'] = "Ewald"
@@ -316,6 +327,8 @@ class SeparationWorkChain(WorkChain):
         self.ctx.raspa_parameters["GeneralSettings"]["PrintEvery"] = int(1e6) #never
         self.ctx.raspa_parameters["Component"][self.inputs.raspa_comp1.value]["WidomProbability"] = 1.0
         self.ctx.raspa_parameters["Component"][self.inputs.raspa_comp2.value]["WidomProbability"] = 1.0
+        self.ctx.raspa_parameters["Component"][self.inputs.raspa_comp1.value]["BlockPocketsFileName"] = self.ctx.block_filename
+        self.ctx.raspa_parameters["Component"][self.inputs.raspa_comp2.value]["BlockPocketsFileName"] = self.ctx.block_filename
         return
 
     def run_raspa_widom(self):
@@ -325,7 +338,7 @@ class SeparationWorkChain(WorkChain):
         # Create the inputs dictionary
         # TODO: make the label of structure variable.
         inputs = {
-            'framework'  : {'hkust1':self.inputs.structure},
+            'framework'  : {self.inputs.structure.label : self.inputs.structure},
             'code'       : self.inputs.raspa_code,
             'parameters' : ParameterData(dict=self.ctx.raspa_parameters).store(),
             'metadata'  :{
@@ -334,8 +347,13 @@ class SeparationWorkChain(WorkChain):
             }
         }
 
+        bp1_path = os.path.join(self.ctx.zeopp_block.outputs.retrieved._repository._get_base_folder().abspath, self.ctx.block_filename + '.block')
+        block_pocket_comp1 = SinglefileData(file=bp1_path)
+
+        inputs['block_pocket'] ={}
+        inputs['block_pocket'][self.ctx.block_filename] = {}
+        inputs['block_pocket'][self.ctx.block_filename] = block_pocket_comp1
         # Check if there are blocking spheres (reading the header of the file) and use them for Raspa
-        #TODO: We need to implement in zeopp plugin to rename the block name.
         # Here, we iterate over compnents and find suitable one if it exists.
         # This section needs to be modified nicely.
 
