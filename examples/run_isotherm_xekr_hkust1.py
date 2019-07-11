@@ -51,7 +51,10 @@ raspa_parameters = Dict(
         },
     })
 
-
+raspa_comp = {
+    'comp1':{'name':'xenon','mol_fraction':0.2,'radius':1.985},
+    'comp2':{'name':'krypton','mol_fraction':0.8,'radius':1.83}
+    }
 
 
 submit(SeparationWorkChain,
@@ -61,6 +64,7 @@ submit(SeparationWorkChain,
     raspa_parameters=raspa_parameters,
     raspa_isotherm_dynamic=False,
     raspa_isotherm_full=False,
+    raspa_comp = raspa_comp,
     selected_pressures=[0.15e5,0.55e5,1.05e5],
     zeopp_probe_radius=zeopp_probe_radius_co2_trappe,
     zeopp_atomic_radii=zeopp_atomic_radii_file,
