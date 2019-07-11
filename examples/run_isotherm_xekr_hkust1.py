@@ -48,12 +48,17 @@ raspa_parameters = Dict(
                 "MoleculeDefinition": "TraPPE",
                 "CreateNumberOfMolecules": 0,
             },
+            "comp3": {
+                "MoleculeDefinition": "TraPPE",
+                "CreateNumberOfMolecules": 0,
+            },
         },
     })
 
 raspa_comp = {
-    'comp1':{'name':'xenon','mol_fraction':0.2,'radius':1.985},
-    'comp2':{'name':'krypton','mol_fraction':0.8,'radius':1.83}
+    'comp1':{'name':'xenon','mol_fraction':0.45,'radius':1.985},
+    'comp2':{'name':'krypton','mol_fraction':0.35,'radius':1.83},
+    'comp3':{'name':'helium','mol_fraction':0.2,'radius':1.26}
     }
 
 

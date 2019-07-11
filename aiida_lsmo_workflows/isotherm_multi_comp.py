@@ -486,7 +486,7 @@ class SeparationWorkChain(WorkChain):
             'parameters' : ParameterData(dict=self.ctx.raspa_parameters).store(),
             'metadata'  :{
                 'options':  self.ctx.raspa_options,
-                'label'  : 'RASPA GCMC Low Pressure',
+                'label'  : 'RASPA GCMC Simulation',
             }
         }
 
@@ -543,7 +543,11 @@ class SeparationWorkChain(WorkChain):
         result_dict['adsorption_energy_average'] = {}
         result_dict['adsorption_energy_dev'] = {}
         result_dict['isotherm_loading'] = {}
+        result_dict['mol_fraction'] = {}
         result_dict['isotherm_enthalpy'] = {}
+        result_dict['conversion_factor_molec_uc_to_cm3stp_cm3'] = {}
+        result_dict['conversion_factor_molec_uc_to_gr_gr'] = {}
+        result_dict['conversion_factor_molec_uc_to_mol_kg'] = {}
 
 
         # Zeopp section
@@ -574,28 +578,28 @@ class SeparationWorkChain(WorkChain):
         # except AttributeError:
         #     pass
 
-        
+
 
         output_widom = self.ctx.raspa_widom.outputs.output_parameters.get_dict()
+        output_gcmc = self.ctx.raspa_gcmc.outputs.output_parameters.get_dict()
         result_dict['temperature'] = self.ctx.raspa_parameters["System"]['hkust1']["ExternalTemperature"]
         result_dict['temperature_unit'] = "K"
         result_dict['henry_coefficient_units'] = output_widom['hkust1']['components'][self.ctx.raspa_comp.comp1.name]['henry_coefficient_units']
         result_dict['adsorption_energy_units'] = output_widom['hkust1']['components'][self.ctx.raspa_comp.comp1.name]['adsorption_energy_widom_units']
 
-        # result_dict['conversion_factor_molec_uc_to_cm3stp_cm3'] = output_gcmc['hkust1']['components'][self.inputs.raspa_comp1.value]['conversion_factor_molec_uc_to_cm3stp_cm3']
-        # result_dict['conversion_factor_molec_uc_to_gr_gr'] = output_gcmc['hkust1']['components'][self.inputs.raspa_comp1.value]['conversion_factor_molec_uc_to_gr_gr']
-        # result_dict['conversion_factor_molec_uc_to_mol_kg'] = output_gcmc['hkust1']['components'][self.inputs.raspa_comp1.value]['conversion_factor_molec_uc_to_mol_kg']
-
-
         for key, value in self.ctx.raspa_comp.items():
             if key in list(self.inputs.raspa_comp):
                 comp_name = value.name
-                # Widom results
+                mol_frac = value.mol_fraction
                 comp = output_widom['hkust1']['components'][comp_name]
                 result_dict['henry_coefficient_average'][comp_name] = comp['henry_coefficient_average']
                 result_dict['henry_coefficient_dev'][comp_name] = comp['henry_coefficient_dev']
                 result_dict['adsorption_energy_average'][comp_name] = comp['adsorption_energy_widom_average']
                 result_dict['adsorption_energy_dev'][comp_name] = comp['adsorption_energy_widom_dev']
+                result_dict['conversion_factor_molec_uc_to_cm3stp_cm3'] = output_gcmc['hkust1']['components'][comp_name]['conversion_factor_molec_uc_to_cm3stp_cm3']
+                result_dict['conversion_factor_molec_uc_to_gr_gr'][comp_name] = output_gcmc['hkust1']['components'][comp_name]['conversion_factor_molec_uc_to_gr_gr']
+                result_dict['conversion_factor_molec_uc_to_mol_kg'] = output_gcmc['hkust1']['components'][comp_name]['conversion_factor_molec_uc_to_mol_kg']
+                result_dict['mol_fraction'][comp_name] = float(mol_frac)
                 result_dict['isotherm_loading'][comp_name] = self.ctx.loading[comp_name]
 
         self.out("results", ParameterData(dict=result_dict).store())
