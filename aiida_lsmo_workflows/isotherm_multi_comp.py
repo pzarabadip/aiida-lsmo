@@ -51,10 +51,11 @@ class SeparationWorkChain(WorkChain):
         spec.input("raspa_parameters", valid_type=ParameterData, required=False)
         spec.input("raspa_isotherm_dynamic", valid_type=bool, default=False, required=False, non_db=True)
         spec.input("raspa_isotherm_full", valid_type=bool, default=False, required=False, non_db=True)
-        #spec.input("raspa_usecharges", valid_type=bool, default=False, required=False)
+        spec.input("raspa_usecharges", valid_type=bool, default=False, required=False, non_db=True)
+        spec.input("raspa_charge_cif", valid_type=bool, default=False, required=False, non_db=True)
         spec.input("raspa_cutoff", valid_type=Float, default=Float(12.0), required=False)
-        spec.input("raspa_minKh", valid_type=Float, default=Float(1e-10), required=False)
-        spec.input("raspa_minKh_sel", valid_type=Float, default=Float(5.0), required=False)
+        # spec.input("raspa_minKh", valid_type=Float, default=Float(1e-10), required=False)
+        # spec.input("raspa_minKh_sel", valid_type=Float, default=Float(5.0), required=False)
         spec.input("raspa_verbosity", valid_type=Int, default=Int(10), required=False)
         spec.input("raspa_widom_cycle_mult", valid_type=Int, default=Int(10), required=False)
         spec.input("raspa_num_of_components", valid_type=Int, default=Int(2), required=False)
@@ -303,7 +304,9 @@ class SeparationWorkChain(WorkChain):
         for key, value in self.ctx.raspa_comp.items():
             if key in list(self.inputs.raspa_comp):
                 comp_name = value.name
+                mol_def = value.mol_def
                 self.ctx.raspa_parameters['Component'][comp_name] = self.ctx.raspa_parameters['Component'].pop(key)
+                self.ctx.raspa_parameters["Component"][comp_name]["MoleculeDefinition"] = mol_def
                 self.ctx.raspa_parameters["Component"][comp_name]["WidomProbability"] = 1.0
 
         ucs = multiply_unit_cell(self.inputs.structure, self.inputs.raspa_cutoff.value)
@@ -313,12 +316,15 @@ class SeparationWorkChain(WorkChain):
         # We check if
 
         # Turn on charges if requested
-        # if self.inputs.raspa_usecharges:
-        #     self.ctx.raspa_parameters['GeneralSettings']['ChargeMethod'] = "Ewald"
-        #     self.ctx.raspa_parameters['GeneralSettings']['EwaldPrecision'] = 1e-6
-        #     self.ctx.raspa_parameters['GeneralSettings']['UseChargesFromCIFFile'] = "yes"
-        # else:
-        #     self.ctx.raspa_parameters['GeneralSettings']['ChargeMethod'] = "None"
+        if self.inputs.raspa_usecharges:
+            self.ctx.raspa_parameters['GeneralSettings']['ChargeMethod'] = "Ewald"
+            self.ctx.raspa_parameters['GeneralSettings']['EwaldPrecision'] = 1e-6
+            if self.inputs.raspa_charge_cif:
+                self.ctx.raspa_parameters['GeneralSettings']['UseChargesFromCIFFile'] = "yes"
+            else:
+                self.ctx.raspa_parameters['GeneralSettings']['ChargeFromChargeEquilibration'] = "yes"
+        else:
+            self.ctx.raspa_parameters['GeneralSettings']['ChargeMethod'] = "None"
 
         # CORRECT the settings to have only Widom insertion
         self.ctx.raspa_parameters["GeneralSettings"]["SimulationType"] = "MonteCarlo"
