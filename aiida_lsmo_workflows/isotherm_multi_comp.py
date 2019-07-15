@@ -10,7 +10,8 @@ from aiida.common import AttributeDict
 from aiida.plugins import CalculationFactory, DataFactory
 from aiida.orm import Code, Dict, Float, Int, List, Str
 from aiida.engine import submit
-from aiida.engine import ToContext, WorkChain, workfunction, if_, while_
+from aiida.engine import ToContext, WorkChain, workfunction, if_, while_, append_
+
 
 from aiida_lsmo_workflows.utils.multiply_unitcell import multiply_unit_cell
 from aiida_lsmo_workflows.utils.pressure_points import choose_pressure_points
@@ -22,6 +23,7 @@ RaspaCalculation = CalculationFactory('raspa')
 ZeoppCalculation = CalculationFactory('zeopp.network')
 NetworkParameters = DataFactory('zeopp.parameters')
 
+# TODO: Change name of workchain!
 class SeparationWorkChain(WorkChain):
     """
     The SeparationWorkChain is designed to calculate loadings
@@ -99,17 +101,17 @@ class SeparationWorkChain(WorkChain):
                  # if_(cls.should_run_zeopp_block)(
                     # cls.run_block_zeopp,
                  # ),
-                cls.init_raspa_widom,
-                cls.run_raspa_widom),
-                if_(cls.should_run_gcmc)(
-                    cls.init_raspa_gcmc,
-                    while_(cls.should_run_another_gcmc)(
-                            cls.run_raspa_gcmc,
-                            cls.parse_raspa_gcmc,
-                    ),
-                ),
-            cls.return_results,
-            )
+            #     cls.init_raspa_widom,
+            #     cls.run_raspa_widom),
+            #     if_(cls.should_run_gcmc)(
+            #         cls.init_raspa_gcmc,
+            #         while_(cls.should_run_another_gcmc)(
+            #                 cls.run_raspa_gcmc,
+            #                 cls.parse_raspa_gcmc,
+            #         ),
+            #     ),
+            # cls.return_results,
+            ),)
 
 
         # to be returned
@@ -125,6 +127,7 @@ class SeparationWorkChain(WorkChain):
                 "num_machines": 1,
                 "tot_num_mpiprocs": 1,
             },
+            "max_memory_kb" : 2000000,
             "max_wallclock_seconds": 1 * 30 * 60,
             "withmpi": False,
         }
@@ -134,6 +137,7 @@ class SeparationWorkChain(WorkChain):
                 "num_machines": 1,
                 "tot_num_mpiprocs": 1,
             },
+            "max_memory_kb": 200000,
             "max_wallclock_seconds": 2 * 60 * 60,
             "withmpi": False,
         }
@@ -202,39 +206,47 @@ class SeparationWorkChain(WorkChain):
         """
         It calculated the surface area and pore volume for pre-selected materials.
         """
-        params = {
-                'sa'   : [self.inputs.zeopp_probe_radius.value,
-                          self.inputs.zeopp_probe_radius.value,
-                          self.inputs.zeopp_block_samples_A3.value,
-                          self.inputs.structure.label + '.sa'],
-                'volpo': [self.inputs.zeopp_probe_radius.value,
-                          self.inputs.zeopp_probe_radius.value,
-                          self.inputs.zeopp_volpo_samples_UC.value,
-                          self.inputs.structure.label + '.volpo'],
-                'ha'   :  self.inputs.zeopp_accuracy.value
-        }
 
-        # Required inputs
-        inputs = {
-            'code'      : self.inputs.zeopp_code,
-            'structure' : self.inputs.structure,
-            'parameters': NetworkParameters(dict=params).store(),
-            'metadata'  :{
-                'options':  self.ctx.zeopp_options,
-                'label'  : 'SaVolpo Calculation',
-            }
-        }
+        for key, value in self.ctx.raspa_comp.items():
+            if key in list(self.inputs.raspa_comp):
+                comp_name = value.name
+                probe_radius = value.radius
 
-        try:
-            inputs['atomic_radii'] = self.inputs.zeopp_atomic_radii
-            self.report("Zeopp will use atomic radii from the .rad file")
-        except:
-            self.report("Zeopp will use default atomic radii")
+                params = {
+                        'sa'   : [probe_radius,
+                                  probe_radius,
+                                  self.inputs.zeopp_block_samples_A3.value,
+                                  self.inputs.structure.label + '_' + comp_name + '.sa'],
+                        'volpo': [probe_radius,
+                                  probe_radius,
+                                  self.inputs.zeopp_volpo_samples_UC.value,
+                                  self.inputs.structure.label + '_' + comp_name + '.volpo'],
+                        'ha'   :  self.inputs.zeopp_accuracy.value
+                }
 
-        # Creating the calculation process and submit it
-        sv = self.submit(ZeoppCalculation, **inputs)
-        self.report("pk: {} | Running zeo++ block pocket calculation".format(sv.pk))
-        return ToContext(zeopp_sv=sv)
+                # Required inputs
+                inputs = {
+                    'code'      : self.inputs.zeopp_code,
+                    'structure' : self.inputs.structure,
+                    'parameters': NetworkParameters(dict=params).store(),
+                    'metadata'  :{
+                        'options':  self.ctx.zeopp_options,
+                        'label'  : 'SaVolpo Calculation',
+                    }
+                }
+
+                try:
+                    inputs['atomic_radii'] = self.inputs.zeopp_atomic_radii
+                    self.report("Zeopp will use atomic radii from the .rad file")
+                except:
+                    self.report("Zeopp will use default atomic radii")
+
+                # Creating the calculation process and submit it
+                sv = self.submit(ZeoppCalculation, **inputs)
+                # sv_label = 'SaVolpoCalcOn_{}'.format(comp_name)
+                self.report("pk: {} | Running SaVolpo calculation".format(sv.pk))
+                return ToContext(zeopp_sv=append_(sv))
+                # return self.to_context(**{sv_label: sv})
 
     def should_run_zeopp_block(self):
         """
@@ -242,8 +254,9 @@ class SeparationWorkChain(WorkChain):
         calcualte block pockets or no.
         """
 
-        ASA = self.ctx.zeopp_sv.get_outgoing().get_node_by_label('output_parameters').get_dict()['ASA_A^2']
-        NASA = self.ctx.zeopp_sv.get_outgoing().get_node_by_label('output_parameters').get_dict()['NASA_A^2']
+        output_sa = self.ctx.raspa_sv.outputs.output_parameters.get_dict()
+        ASA = output_sa['ASA_A^2']
+        NASA = output_sa['NASA_A^2']
 
         if (NASA > 0.0) and (ASA > 0.0):
             self.report("We need to calcualte the block pocket file!")
@@ -574,7 +587,7 @@ class SeparationWorkChain(WorkChain):
         # except AttributeError:
         #     pass
 
-        
+
 
         output_widom = self.ctx.raspa_widom.outputs.output_parameters.get_dict()
         result_dict['temperature'] = self.ctx.raspa_parameters["System"]['hkust1']["ExternalTemperature"]
