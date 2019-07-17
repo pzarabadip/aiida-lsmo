@@ -1,8 +1,8 @@
 import os
 from aiida.plugins import DataFactory
-from aiida.orm import Code, Dict, Float, Int
+from aiida.orm import Code, Dict, Float, Int, Str
 from aiida.engine import run, submit
-from aiida_lsmo_workflows.isotherm_multi_comp import SeparationWorkChain
+from aiida_lsmo_workflows.isotherm_multi_comp import MultiCompIsothermWorkChain
 
 ParameterData = DataFactory('dict')
 SinglefileData = DataFactory('singlefile')
@@ -52,12 +52,12 @@ raspa_parameters = Dict(
     })
 
 raspa_comp = {
-    'comp1':{'name':'xenon','mol_fraction':0.2,'radius':1.985},
-    'comp2':{'name':'krypton','mol_fraction':0.8,'radius':1.83}
+    'comp1':{'name':'xenon','mol_fraction':0.2,'radius':1.985, 'mol_def':'TraPPE'},
+    'comp2':{'name':'krypton','mol_fraction':0.8,'radius':1.986, 'mol_def':'TraPPE'}
     }
 
 
-submit(SeparationWorkChain,
+submit(MultiCompIsothermWorkChain,
     structure=structure,
     zeopp_code=zeopp_code,
     raspa_code=raspa_code,
@@ -66,7 +66,8 @@ submit(SeparationWorkChain,
     raspa_isotherm_full=False,
     raspa_comp = raspa_comp,
     selected_pressures=[0.15e5,0.55e5,1.05e5],
-    zeopp_probe_radius=zeopp_probe_radius_co2_trappe,
+    # zeopp_probe_radius=zeopp_probe_radius_co2_trappe,
     zeopp_atomic_radii=zeopp_atomic_radii_file,
+    zeopp_accuracy=Str('DEF'),
     # label='SeparationWorkChain',
     )
