@@ -8,7 +8,7 @@ from copy import deepcopy
 
 from aiida.common import AttributeDict
 from aiida.plugins import CalculationFactory, DataFactory
-from aiida.orm import Code, Dict, Float, Int, List, Str
+from aiida.orm import Code, Dict, Float, Int, List, Str, load_node
 from aiida.engine import submit
 from aiida.engine import ToContext, WorkChain, workfunction, if_, while_, append_
 
@@ -332,7 +332,6 @@ class MultiCompIsothermWorkChain(WorkChain):
 
         # Create a deepcopy of the user parameters, to modify before submission
         self.ctx.raspa_parameters = deepcopy(self.inputs.raspa_parameters.get_dict())
-
         for key, value in self.ctx.raspa_comp.items():
             if key in list(self.inputs.raspa_comp):
                 comp_name = value.name
@@ -341,7 +340,8 @@ class MultiCompIsothermWorkChain(WorkChain):
                 self.ctx.raspa_parameters['Component'][comp_name] = self.ctx.raspa_parameters['Component'].pop(key)
                 self.ctx.raspa_parameters["Component"][comp_name]["MoleculeDefinition"] = mol_def
                 self.ctx.raspa_parameters["Component"][comp_name]["WidomProbability"] = 1.0
-                self.ctx.raspa_parameters["Component"][comp_name]["BlockPocketsFileName"] = bp_label
+                #self.ctx.raspa_parameters["Component"][comp_name]["BlockPocketsFileName"]["self.inputs.structure.label"] = bp_label
+                #self.ctx.raspa_parameters["Component"][comp_name]["BlockPocketsFileName"] = bp_label
 
         ucs = multiply_unit_cell(self.inputs.structure, self.inputs.raspa_cutoff.value)
         self.ctx.raspa_parameters['GeneralSettings']['UnitCells'] = "{} {} {}".format(ucs[0], ucs[1], ucs[2])
@@ -373,7 +373,7 @@ class MultiCompIsothermWorkChain(WorkChain):
         inputs = {
             'framework'  : {self.inputs.structure.label : self.inputs.structure},
             'code'       : self.inputs.raspa_code,
-            'parameters' : ParameterData(dict=self.ctx.raspa_parameters).store(),
+            #'parameters' : ParameterData(dict=self.ctx.raspa_parameters).store(),
             'metadata'  :{
                 'options':  self.ctx.raspa_options,
                 'label'  : 'RASPA Widom Calculation',
@@ -393,14 +393,26 @@ class MultiCompIsothermWorkChain(WorkChain):
                 with open(bp_path, 'r') as block_file:
                     self.ctx.number_blocking_spheres[comp_name] = int(block_file.readline().strip())
                     if self.ctx.number_blocking_spheres[comp_name] > 0:
-                        # bp_comp = SinglefileData(file=bp_path)
+                        self.ctx.raspa_parameters["Component"][comp_name]["BlockPocketsFileName"] = {}
+                        self.ctx.raspa_parameters["Component"][comp_name]["BlockPocketsFileName"][self.inputs.structure.label] = bp_label
+
+                        # This creates a new node which is not linked to the source.
+                        # bp_comp = SinglefileData(file=bp_path).store()
+                        # inputs['block_pocket'][bp_label] = bp_comp
+                        # This still does not solve the issue and file is not being used.
+                        # inputs['block_pocket'][bp_label] = load_node(self.ctx[zeopp_label].outputs.block.uuid)
+
+                        # This creates the link but the file is not retrieved to be used.
                         inputs['block_pocket'][bp_label] = self.ctx[zeopp_label].outputs.block
+
 
                         self.report("({}) Blocking spheres are present for ({}) and used for Raspa".format(self.ctx.number_blocking_spheres[comp_name],comp_name))
                     else:
                         self.report("No blocking spheres found for ({})".format(comp_name))
 
+        inputs['parameters'] = ParameterData(dict=self.ctx.raspa_parameters).store()
         # Create the calculation process and launch it
+        # self.report("this is how inputs sectio look like {}".format(inputs))
         widom = self.submit(RaspaCalculation, **inputs)
         self.report("pk: {} | Running Raspa Widom for the Henry coefficient".format(widom.pk))
 
@@ -496,6 +508,9 @@ class MultiCompIsothermWorkChain(WorkChain):
                 self.ctx.raspa_parameters["Component"][comp_name]["RotationProbability"] = 0.5
                 self.ctx.raspa_parameters["Component"][comp_name]["ReinsertionProbability"] = 0.5
                 self.ctx.raspa_parameters["Component"][comp_name]["SwapProbability"] = 1.0
+                self.ctx.raspa_parameters["Component"][comp_name]["IdentityChangeProbability"] = 1.0
+                self.ctx.raspa_parameters["Component"][comp_name]["NumberOfIdentityChanges"] = len(list(self.inputs.raspa_comp))
+                self.ctx.raspa_parameters["Component"][comp_name]["IdentityChangesList"] = [i for i in range(len(list(self.inputs.raspa_comp)))]
         return
 
     def should_run_another_gcmc(self):
