@@ -1,5 +1,5 @@
 """
-Selectivity and Working Capacity WorkChain
+Multi Component Isotherm WorkChain
 """
 from __future__ import absolute_import
 import os
@@ -8,9 +8,10 @@ from copy import deepcopy
 
 from aiida.common import AttributeDict
 from aiida.plugins import CalculationFactory, DataFactory
-from aiida.orm import Code, Dict, Float, Int, List, Str
+from aiida.orm import Code, Dict, Float, Int, List, Str, load_node
 from aiida.engine import submit
-from aiida.engine import ToContext, WorkChain, workfunction, if_, while_
+from aiida.engine import ToContext, WorkChain, workfunction, if_, while_, append_
+
 
 from aiida_lsmo_workflows.utils.multiply_unitcell import multiply_unit_cell
 from aiida_lsmo_workflows.utils.pressure_points import choose_pressure_points
@@ -22,18 +23,18 @@ RaspaCalculation = CalculationFactory('raspa')
 ZeoppCalculation = CalculationFactory('zeopp.network')
 NetworkParameters = DataFactory('zeopp.parameters')
 
-class SeparationWorkChain(WorkChain):
+
+class MultiCompIsothermWorkChain(WorkChain):
     """
-    The SeparationWorkChain is designed to calculate loadings
-    of a multi-component gas mixture at two pressure points
-    and return the selectivity and working capacity/deliverable_capacity.
+    The MultiCompIsothermWorkChain is designed to perform zeo++ and
+    RASPA calculations for multi-component mixtures.
     """
 
     @classmethod
     def define(cls, spec):
-        super(SeparationWorkChain, cls).define(spec)
-        """Define workflow specification.
-
+        super(MultiCompIsothermWorkChain, cls).define(spec)
+        """
+        Define workflow specification.
         This is the most important method of a Workchain, which defines the
         inputs it takes, the logic of the execution and the outputs
         that are generated in the process.
@@ -42,9 +43,9 @@ class SeparationWorkChain(WorkChain):
         spec.input('structure', valid_type=CifData, required=True, help='Input structure in cif format')
         # Zeopp inputs
         spec.input('zeopp_code', valid_type=Code, required=False)
-        spec.input("zeopp_probe_radius", valid_type=Float, required=False)
+        # It is being provided for each component so we can remove it from here.
+        # spec.input("zeopp_probe_radius", valid_type=Float, required=False)
         spec.input("zeopp_atomic_radii", valid_type=SinglefileData, required=False)
-
 
         # Raspa inputs
         spec.input("raspa_code", valid_type=Code, required=False)
@@ -76,39 +77,23 @@ class SeparationWorkChain(WorkChain):
         spec.input("zeopp_lcd_max", valid_type=Float, default=Float(15.0), required=False)
         spec.input("zeopp_pld_min", valid_type=Float, default=Float(3.9), required=False)
 
-        #Workflow
-        # spec.outline(
-        #     cls.setup,
-        # #     cls.run_pore_dia_zeopp,
-        #     cls.init_raspa_widom,
-        #     cls.run_raspa_widom,
-        #     if_(cls.should_run_gcmc),(
-        #         cls.init_raspa_gcmc,
-        #         while_(cls.should_run_another_gcmc)(
-        #            cls.run_raspa_gcmc),
-        #            ),
-        #     # cls.run_raspa_gcmc,
-        # #     cls.run_raspa_gcmc_low,
-        # # )
+        # Workflow
         spec.outline(
             cls.setup,
             cls.run_pore_dia_zeopp,
-            #cls.init_raspa_widom,
-            #cls.run_raspa_widom,
-            if_(cls.should_run_zeopp_volpo)(
-                cls.run_savolpo_zeopp,
-                 # if_(cls.should_run_zeopp_block)(
-                    # cls.run_block_zeopp,
-                 # ),
+            if_(cls.should_run_zeopp_full)(
+                cls.run_zeopp_full,
+                cls.inspect_zeopp_calc,
                 cls.init_raspa_widom,
-                cls.run_raspa_widom),
+                cls.run_raspa_widom,
                 if_(cls.should_run_gcmc)(
                     cls.init_raspa_gcmc,
                     while_(cls.should_run_another_gcmc)(
-                            cls.run_raspa_gcmc,
-                            cls.parse_raspa_gcmc,
+                        cls.run_raspa_gcmc,
+                        cls.parse_raspa_gcmc,
                     ),
                 ),
+            ),
             cls.return_results,
             )
 
@@ -126,6 +111,7 @@ class SeparationWorkChain(WorkChain):
                 "num_machines": 1,
                 "tot_num_mpiprocs": 1,
             },
+            "max_memory_kb" : 2000000,
             "max_wallclock_seconds": 1 * 30 * 60,
             "withmpi": False,
         }
@@ -135,12 +121,14 @@ class SeparationWorkChain(WorkChain):
                 "num_machines": 1,
                 "tot_num_mpiprocs": 1,
             },
+            "max_memory_kb": 200000,
             "max_wallclock_seconds": 2 * 60 * 60,
             "withmpi": False,
         }
 
 
         self.ctx.raspa_comp = AttributeDict(self.inputs.raspa_comp)
+
         #TODO: Adding zeopp parameters too.
         self.ctx.raspa_pressure_min = self.inputs.raspa_pressure_min
         self.ctx.raspa_pressure_max = self.inputs.raspa_pressure_max
@@ -180,7 +168,7 @@ class SeparationWorkChain(WorkChain):
         self.report("pk: {} | Running zeo++ pore diameter calculation".format(res.pk))
         return ToContext(zeopp_res=res)
 
-    def should_run_zeopp_volpo(self):
+    def should_run_zeopp_full(self):
         """
         It uses largest included sphere (Di or LCD) and largest free sphere
         (Df or PLD) as pre-screenig descriptors to pass or reject the
@@ -193,104 +181,147 @@ class SeparationWorkChain(WorkChain):
         pld_current = self.ctx.zeopp_res.outputs.output_parameters.get_dict()['Largest_free_sphere']
 
         if (lcd_current < lcd_lim) and (pld_current > pld_lim):
-            self.report("This is a suitable structure for further investigation")
+            self.report("{} is a suitable structure for further investigation".format(self.inputs.structure.label))
             return True
         else:
-            self.report("It does not look like promising: stop")
+            self.report("{} does not look like promising: stop".format(self.inputs.structure.label))
             return False
 
-    def run_savolpo_zeopp(self):
+    def run_zeopp_full(self):
         """
-        It calculated the surface area and pore volume for pre-selected materials.
-        """
-        params = {
-                'sa'   : [self.inputs.zeopp_probe_radius.value,
-                          self.inputs.zeopp_probe_radius.value,
-                          self.inputs.zeopp_block_samples_A3.value,
-                          self.inputs.structure.label + '.sa'],
-                'volpo': [self.inputs.zeopp_probe_radius.value,
-                          self.inputs.zeopp_probe_radius.value,
-                          self.inputs.zeopp_volpo_samples_UC.value,
-                          self.inputs.structure.label + '.volpo'],
-                'ha'   :  self.inputs.zeopp_accuracy.value
-        }
-
-        # Required inputs
-        inputs = {
-            'code'      : self.inputs.zeopp_code,
-            'structure' : self.inputs.structure,
-            'parameters': NetworkParameters(dict=params).store(),
-            'metadata'  :{
-                'options':  self.ctx.zeopp_options,
-                'label'  : 'SaVolpo Calculation',
-            }
-        }
-
-        try:
-            inputs['atomic_radii'] = self.inputs.zeopp_atomic_radii
-            self.report("Zeopp will use atomic radii from the .rad file")
-        except:
-            self.report("Zeopp will use default atomic radii")
-
-        # Creating the calculation process and submit it
-        sv = self.submit(ZeoppCalculation, **inputs)
-        self.report("pk: {} | Running zeo++ block pocket calculation".format(sv.pk))
-        return ToContext(zeopp_sv=sv)
-
-    def should_run_zeopp_block(self):
-        """
-        Base on the outcomes of SaVolpo calculation here we decide if we need to
-        calcualte block pockets or no.
+        It calculated the surface area, pore volume, and
+        possible block pockets for pre-selected materials.
         """
 
-        ASA = self.ctx.zeopp_sv.get_outgoing().get_node_by_label('output_parameters').get_dict()['ASA_A^2']
-        NASA = self.ctx.zeopp_sv.get_outgoing().get_node_by_label('output_parameters').get_dict()['NASA_A^2']
+        for key, value in self.ctx.raspa_comp.items():
+            if key in list(self.inputs.raspa_comp):
+                comp_name = value.name
+                probe_radius = value.radius
 
-        if (NASA > 0.0) and (ASA > 0.0):
-            self.report("We need to calcualte the block pocket file!")
-            return True
-        elif (NASA == 0.0) and (ASA > 0.0):
-            self.report("All pores is accessible!")
-            return False
-        else:
-            self.report("This structure is full of inaccessibility! : stop")
-            pass
+                params = {
+                        'sa'   : [probe_radius,
+                                  probe_radius,
+                                  self.inputs.zeopp_block_samples_A3.value,
+                                  self.inputs.structure.label + '_' + comp_name + '.sa'],
+                        'volpo': [probe_radius,
+                                  probe_radius,
+                                  self.inputs.zeopp_volpo_samples_UC.value,
+                                  self.inputs.structure.label + '_' + comp_name + '.volpo'],
+                        'block': [probe_radius,
+                                  self.inputs.zeopp_block_samples_A3.value,
+                                  self.inputs.structure.label + '_' + comp_name + '.block'],
+                        'ha'   :  self.inputs.zeopp_accuracy.value
+                }
 
-    def run_block_zeopp(self):
-        """
-        It calculates the block pockets only on structures with non-accessible void fraction.
-        """
+                # Required inputs
+                inputs = {
+                    'code'      : self.inputs.zeopp_code,
+                    'structure' : self.inputs.structure,
+                    'parameters': NetworkParameters(dict=params).store(),
+                    'metadata'  :{
+                        'options':  self.ctx.zeopp_options,
+                        'label'  : 'Zeo++ Calculation',
+                    }
+                }
 
-        self.ctx.block_filename = '_'.join((self.inputs.structure.label, self.inputs.raspa_comp1.value))
+                try:
+                    inputs['atomic_radii'] = self.inputs.zeopp_atomic_radii
+                    self.report("Zeopp will use atomic radii from the .rad file")
+                except:
+                    self.report("Zeopp will use default atomic radii")
 
-        params = {
-                'block': [self.inputs.zeopp_probe_radius.value,
-                          self.inputs.zeopp_block_samples_A3.value,
-                          self.ctx.block_filename + '.block'],
-                'ha'   : self.inputs.zeopp_accuracy.value
-        }
+                # Creating the calculation process and submit it
+                zeopp_full = self.submit(ZeoppCalculation, **inputs)
+                zeopp_label = 'zeopp_{}'.format(comp_name)
+                self.report("pk: {} | Running Zeo++ calculation using {} probe".format(zeopp_full.pk,comp_name))
+                self.to_context(**{zeopp_label: zeopp_full})
 
-        # Required inputs
-        inputs = {
-            'code'      : self.inputs.zeopp_code,
-            'structure' : self.inputs.structure,
-            'parameters': NetworkParameters(dict=params).store(),
-            'metadata'  :{
-                'options':  self.ctx.zeopp_options,
-                'label'  : 'Pore Block Calculation',
-            }
-        }
 
-        try:
-            inputs['atomic_radii'] = self.inputs.zeopp_atomic_radii
-            self.report("Zeopp will use atomic radii from the .rad file")
-        except:
-            self.report("Zeopp will use default atomic radii")
+    def inspect_zeopp_calc(self):
+        for key, value in self.ctx.raspa_comp.items():
+            if key in list(self.inputs.raspa_comp):
+                comp_name = value.name
+                zeopp_label = 'zeopp_{}'.format(comp_name)
+                self.report("Checking if {} job finished OK".format(zeopp_label))
+                assert self.ctx[zeopp_label].is_finished_ok
 
-        # Creating the calculation process and submit it
-        block = self.submit(ZeoppCalculation, **inputs)
-        self.report("pk: {} | Running zeo++ block pocket calculation".format(block.pk))
-        return ToContext(zeopp_block=block)
+    # def should_run_zeopp_block(self):
+    #     """
+    #     Base on the outcomes of SaVolpo calculation here we decide if we need to
+    #     calcualte block pockets or no.
+    #     """
+    #     for key, value in self.ctx.raspa_comp.items():
+    #         if key in list(self.inputs.raspa_comp):
+    #             comp_name = value.name
+    #
+    #             sv_label = 'sv_{}'.format(comp_name)
+    #
+    #             output_sa = self.ctx[sv_label].outputs.output_parameters.get_dict()
+    #             ASA = output_sa['ASA_A^2']
+    #             NASA = output_sa['NASA_A^2']
+    #
+    #             if (NASA > 0.0) and (ASA > 0.0):
+    #                 self.report("We need to calcualte the block pocket file for {}!".format(comp_name))
+    #                 self.to_context(**{sv_label: True})
+    #                 # return True
+    #             elif (NASA == 0.0) and (ASA > 0.0):
+    #                 self.report("All pores are accessible to {}!".format(comp_name))
+    #                 self.to_context(**{sv_label: False})
+    #                 # return False
+    #             else:
+    #                 self.report("This structure does not present any accessibility to! : stop")
+    #                 pass
+
+    # def run_block_zeopp(self):
+    #     """
+    #     It calculates the block pockets only on structures with non-accessible void fraction.
+    #     """
+    #     for key, value in self.ctx.raspa_comp.items():
+    #         if key in list(self.inputs.raspa_comp):
+    #             comp_name = value.name
+    #             probe_radius = value.radius
+    #
+    #
+    #
+    #             params = {
+    #                     'block': [probe_radius,
+    #                               self.inputs.zeopp_block_samples_A3.value,
+    #                               self.inputs.structure.label + '_' + comp_name + '.block'],
+    #                     'ha'   : self.inputs.zeopp_accuracy.value
+    #             }
+    #
+    #             # Required inputs
+    #             inputs = {
+    #                 'code'      : self.inputs.zeopp_code,
+    #                 'structure' : self.inputs.structure,
+    #                 'parameters': NetworkParameters(dict=params).store(),
+    #                 'metadata'  :{
+    #                     'options':  self.ctx.zeopp_options,
+    #                     'label'  : 'Pore Block Calculation',
+    #                 }
+    #             }
+    #
+    #             try:
+    #                 inputs['atomic_radii'] = self.inputs.zeopp_atomic_radii
+    #                 self.report("Zeopp will use atomic radii from the .rad file")
+    #             except:
+    #                 self.report("Zeopp will use default atomic radii")
+    #
+    #
+    #             # Creating the calculation process and submit it
+    #             block = self.submit(ZeoppCalculation, **inputs)
+    #             block_label = 'block_{}'.format(comp_name)
+    #             self.report("pk: {} | Running Pore Block calculation using {} probe".format(block.pk,comp_name))
+    #             #return ToContext(zeopp_sv=append_(sv))
+    #             self.to_context(**{block_label: block})
+
+    # def inspect_block_calc(self):
+    #     for key, value in self.ctx.raspa_comp.items():
+    #         if key in list(self.inputs.raspa_comp):
+    #             comp_name = value.name
+    #             block_label = 'block_{}'.format(comp_name)
+    #             # self.report("Checking if {} job finished OK".format(sv_label))
+    #             assert self.ctx[block_label].is_finished_ok
 
     def init_raspa_widom(self):
         """
@@ -300,20 +331,19 @@ class SeparationWorkChain(WorkChain):
 
         # Create a deepcopy of the user parameters, to modify before submission
         self.ctx.raspa_parameters = deepcopy(self.inputs.raspa_parameters.get_dict())
-
         for key, value in self.ctx.raspa_comp.items():
             if key in list(self.inputs.raspa_comp):
                 comp_name = value.name
                 mol_def = value.mol_def
+                bp_label = '_'.join((self.inputs.structure.label,comp_name))
                 self.ctx.raspa_parameters['Component'][comp_name] = self.ctx.raspa_parameters['Component'].pop(key)
                 self.ctx.raspa_parameters["Component"][comp_name]["MoleculeDefinition"] = mol_def
                 self.ctx.raspa_parameters["Component"][comp_name]["WidomProbability"] = 1.0
+                #self.ctx.raspa_parameters["Component"][comp_name]["BlockPocketsFileName"]["self.inputs.structure.label"] = bp_label
+                #self.ctx.raspa_parameters["Component"][comp_name]["BlockPocketsFileName"] = bp_label
 
         ucs = multiply_unit_cell(self.inputs.structure, self.inputs.raspa_cutoff.value)
         self.ctx.raspa_parameters['GeneralSettings']['UnitCells'] = "{} {} {}".format(ucs[0], ucs[1], ucs[2])
-
-        # Adding block files:
-        # We check if
 
         # Turn on charges if requested
         if self.inputs.raspa_usecharges:
@@ -339,38 +369,49 @@ class SeparationWorkChain(WorkChain):
         It runs a Widom calculation in Raspa.
         """
         # Create the inputs dictionary
-        # TODO: make the label of structure variable.
         inputs = {
             'framework'  : {self.inputs.structure.label : self.inputs.structure},
             'code'       : self.inputs.raspa_code,
-            'parameters' : ParameterData(dict=self.ctx.raspa_parameters).store(),
+            #'parameters' : ParameterData(dict=self.ctx.raspa_parameters).store(),
             'metadata'  :{
                 'options':  self.ctx.raspa_options,
                 'label'  : 'RASPA Widom Calculation',
             }
         }
 
-        # bp1_path = os.path.join(self.ctx.zeopp_block.outputs.retrieved._repository._get_base_folder().abspath, self.ctx.block_filename + '.block')
-        # block_pocket_comp1 = SinglefileData(file=bp1_path)
-        #
-        # inputs['block_pocket'] ={}
-        # inputs['block_pocket'][self.ctx.block_filename] = {}
-        # inputs['block_pocket'][self.ctx.block_filename] = block_pocket_comp1
+        inputs['block_pocket'] = {}
+        self.ctx.number_blocking_spheres = {}
 
-        # Check if there are blocking spheres (reading the header of the file) and use them for Raspa
-        # Here, we iterate over compnents and find suitable one if it exists.
-        # This section needs to be modified nicely.
+        for key, value in self.ctx.raspa_comp.items():
+            if key in list(self.inputs.raspa_comp):
+                comp_name = value.name
+                zeopp_label = 'zeopp_{}'.format(comp_name)
+                bp_label = '_'.join((self.inputs.structure.label,comp_name))
+                bp_path = os.path.join(self.ctx[zeopp_label].outputs.retrieved._repository._get_base_folder().abspath, bp_label + '.block')
 
-        #with open(self.ctx.zeopp_block['block'].get_abs_path() + '/path/' + \
-        #          self.ctx.zeopp_block['block'].get_folder_list()[0]) as f:
-        #    self.ctx.number_blocking_spheres = int(f.readline().strip())
-        #if self.ctx.number_blocking_spheres > 0:
-        #    inputs['block_component_0'] = self.ctx.zeopp['block']
-        #    self.report("Blocking spheres ({}) are present and used for Raspa".format(self.ctx.number_blocking_spheres))
-        #else:
-        #    self.report("No blocking spheres found")
+                with open(bp_path, 'r') as block_file:
+                    self.ctx.number_blocking_spheres[comp_name] = int(block_file.readline().strip())
+                    if self.ctx.number_blocking_spheres[comp_name] > 0:
+                        self.ctx.raspa_parameters["Component"][comp_name]["BlockPocketsFileName"] = {}
+                        self.ctx.raspa_parameters["Component"][comp_name]["BlockPocketsFileName"][self.inputs.structure.label] = bp_label
 
+                        # This creates a new node which is not linked to the source.
+                        # bp_comp = SinglefileData(file=bp_path).store()
+                        # inputs['block_pocket'][bp_label] = bp_comp
+                        # This still does not solve the issue and file is not being used.
+                        # inputs['block_pocket'][bp_label] = load_node(self.ctx[zeopp_label].outputs.block.uuid)
+
+                        # This creates the link but the file is not retrieved to be used.
+                        inputs['block_pocket'][bp_label] = self.ctx[zeopp_label].outputs.block
+
+
+                        self.report("({}) Blocking spheres are present for ({}) and used for Raspa".format(self.ctx.number_blocking_spheres[comp_name],comp_name))
+                    else:
+                        self.report("No blocking spheres found for ({})".format(comp_name))
+
+        inputs['parameters'] = ParameterData(dict=self.ctx.raspa_parameters).store()
         # Create the calculation process and launch it
+        # self.report("this is how inputs sectio look like {}".format(inputs))
         widom = self.submit(RaspaCalculation, **inputs)
         self.report("pk: {} | Running Raspa Widom for the Henry coefficient".format(widom.pk))
 
@@ -388,12 +429,13 @@ class SeparationWorkChain(WorkChain):
         """
         output = self.ctx.raspa_widom.outputs.output_parameters.get_dict()
         #TODO: make it more comprehensive to flag possible selectivity inversion.
-        Kh_desired_comp = output['hkust1']['components'][self.ctx.raspa_comp.comp1.name]['henry_coefficient_average']
+        # Desired compound should be set to comp1 in the input.
+        Kh_desired_comp = output[self.inputs.structure.label]['components'][self.ctx.raspa_comp.comp1.name]['henry_coefficient_average']
         for key, value in self.ctx.raspa_comp.items():
             if key in list(self.inputs.raspa_comp):
                 comp_name = value.name
                 if comp_name != self.ctx.raspa_comp.comp1.name:
-                    Kh_comp = output['hkust1']['components'][comp_name]['henry_coefficient_average']
+                    Kh_comp = output[self.inputs.structure.label]['components'][comp_name]['henry_coefficient_average']
                     if Kh_comp < Kh_desired_comp:
                         self.report("Ideal selectivity larger than the threshold: compute binary loading")
                         return True
@@ -403,8 +445,6 @@ class SeparationWorkChain(WorkChain):
 
         # TODO: using count and len() for more than two components.
 
-        # kh = {}
-        # kh.update({comp_name:(output['hkust1']['components'][comp_name]['henry_coefficient_average'])/})
 
     def init_raspa_gcmc(self):
         """
@@ -423,7 +463,7 @@ class SeparationWorkChain(WorkChain):
             poreVol = self.ctx.zeopp_sv.outputs.output_parameters.get_dict()['POAV_cm^3/g'] #(cm3/g = l/kg)
             self.ctx.estimated_qsat = satDens * poreVol
             self.ctx.pressures = choose_pressure_points(
-                # It currently takes the greatest henry coefficient.
+                # TODO: It currently takes the greatest henry coefficient.
                 Kh = self.ctx.kh_for_iso, #(mol/kg/Pa)
                 qst = self.ctx.estimated_qsat, #(mol/kg_frame)
                 dpa = self.inputs.raspa_gcmc_press_precision.value, #(kg*Pa/mol)
@@ -467,6 +507,9 @@ class SeparationWorkChain(WorkChain):
                 self.ctx.raspa_parameters["Component"][comp_name]["RotationProbability"] = 0.5
                 self.ctx.raspa_parameters["Component"][comp_name]["ReinsertionProbability"] = 0.5
                 self.ctx.raspa_parameters["Component"][comp_name]["SwapProbability"] = 1.0
+                self.ctx.raspa_parameters["Component"][comp_name]["IdentityChangeProbability"] = 1.0
+                self.ctx.raspa_parameters["Component"][comp_name]["NumberOfIdentityChanges"] = len(list(self.inputs.raspa_comp))
+                self.ctx.raspa_parameters["Component"][comp_name]["IdentityChangesList"] = [i for i in range(len(list(self.inputs.raspa_comp)))]
         return
 
     def should_run_another_gcmc(self):
@@ -486,21 +529,26 @@ class SeparationWorkChain(WorkChain):
         self.ctx.raspa_parameters['System']['hkust1']['ExternalPressure'] = pressure
         # Create the input dictionary
         inputs = {
-            'framework'  : {'hkust1':self.inputs.structure},
-            #'hkust1'     : self.inputs.structure_raspa,
+            'framework'  : {self.inputs.structure.label:self.inputs.structure},
             'code'       : self.inputs.raspa_code,
             'parameters' : ParameterData(dict=self.ctx.raspa_parameters).store(),
             'metadata'  :{
                 'options':  self.ctx.raspa_options,
-                'label'  : 'RASPA GCMC Simulation',
+                'label'  : 'RASPA GCMC Calculation',
+
             }
         }
 
-        # Check if there are poket blocks to be loaded
-        # Needs to be revised.
-        #if self.ctx.number_blocking_spheres > 0:
-        #    inputs['block_component_0'] = self.ctx.zeopp['block']
+        inputs['block_pocket'] ={}
 
+        for key, value in self.ctx.raspa_comp.items():
+            if key in list(self.inputs.raspa_comp):
+                comp_name = value.name
+                zeopp_label = 'zeopp_{}'.format(comp_name)
+                bp_label = '_'.join((self.inputs.structure.label,comp_name))
+                if self.ctx.number_blocking_spheres[comp_name] > 0:
+                    # bp_comp = self.ctx[zeopp_label].outputs.block
+                    inputs['block_pocket'][bp_label] = self.ctx[zeopp_label].outputs.block
 
         # Create the calculation process and launch it
         gcmc = self.submit(RaspaCalculation, **inputs)
@@ -512,7 +560,7 @@ class SeparationWorkChain(WorkChain):
         Extract the pressure and loading average of the last completed raspa
         calculation.
         """
-        pressure = self.ctx.raspa_parameters['System']['hkust1']['ExternalPressure']/1e5
+        pressure = self.ctx.raspa_parameters['System'][self.inputs.structure.label]['ExternalPressure']/1e5
         output_gcmc = self.ctx.raspa_gcmc.outputs.output_parameters.get_dict()
 
         if self.ctx.current_p_index == 0:
@@ -526,9 +574,9 @@ class SeparationWorkChain(WorkChain):
         for key, value in self.ctx.raspa_comp.items():
             if key in list(self.inputs.raspa_comp):
                 comp_name = value.name
-                conv1 = output_gcmc['hkust1']['components'][comp_name]['conversion_factor_molec_uc_to_mol_kg']
-                loading_average_comp = conv1 * output_gcmc['hkust1']['components'][comp_name]['loading_absolute_average']
-                loading_dev_comp = conv1 * output_gcmc['hkust1']['components'][comp_name]['loading_absolute_dev']
+                conv1 = output_gcmc[self.inputs.structure.label]['components'][comp_name]['conversion_factor_molec_uc_to_mol_kg']
+                loading_average_comp = conv1 * output_gcmc[self.inputs.structure.label]['components'][comp_name]['loading_absolute_average']
+                loading_dev_comp = conv1 * output_gcmc[self.inputs.structure.label]['components'][comp_name]['loading_absolute_dev']
                 self.ctx.loading[comp_name].append([pressure, loading_average_comp, loading_dev_comp])
 
         # Update counter and parent folder for restart
@@ -551,53 +599,61 @@ class SeparationWorkChain(WorkChain):
         result_dict['isotherm_loading'] = {}
         result_dict['mol_fraction'] = {}
         result_dict['isotherm_enthalpy'] = {}
-        result_dict['conversion_factor_molec_uc_to_cm3stp_cm3'] = {}
-        result_dict['conversion_factor_molec_uc_to_gr_gr'] = {}
-        result_dict['conversion_factor_molec_uc_to_mol_kg'] = {}
-
-
-        # Zeopp section
-        output_zeo = self.ctx.zeopp_sv.outputs.output_parameters.get_dict()
-        result_dict['Density'] = output_zeo['Density']
+        result_dict['number_blocking_spheres'] = {}
+        result_dict['POAV_Volume_fraction'] = {}
+        result_dict['PONAV_Volume_fraction'] = {}
+        result_dict['POAV'] = {}
+        result_dict['GASA'] = {}
+        result_dict['VASA'] = {}
+        result_dict['NGASA'] = {}
+        result_dict['NVASA'] = {}
+        result_dict['Channel_surface_area'] = {}
+        result_dict['Pocket_surface_area'] = {}
+        result_dict['number_blocking_spheres'] = {}
         result_dict['Density_unit'] = "g/cm^3"
-        result_dict['POAV_Volume_fraction'] = output_zeo['POAV_Volume_fraction']
-        result_dict['PONAV_Volume_fraction'] = output_zeo['PONAV_Volume_fraction']
-        result_dict['POAV'] = output_zeo['POAV_cm^3/g']
         result_dict['POAV_unit'] = "cm^3/g"
-        result_dict['GASA'] = output_zeo['ASA_m^2/g']
         result_dict['GASA_unit'] = "m^2/g"
-        result_dict['VASA'] = output_zeo['ASA_m^2/cm^3']
         result_dict['VASA_unit'] = "m^2/cm^3"
-        result_dict['NGASA'] = output_zeo['NASA_m^2/g']
         result_dict['NGASA_unit'] = "m^2/g"
-        result_dict['NVASA'] = output_zeo['NASA_m^2/cm^3']
         result_dict['NVASA_unit'] = "ASA_m^2/cm^3"
-        result_dict['Channel_surface_area'] = output_zeo['Channel_surface_area_A^2']
         result_dict['Channel_surface_area_unit'] = "A^2"
-        result_dict['Pocket_surface_area'] = output_zeo['Pocket_surface_area_A^2']
         result_dict['Pocket_surface_area_unit'] = "A^2"
 
-
-        #TODO needs to be fixed!
-        # try:
-        #     result_dict['number_blocking_spheres'] = self.ctx.number_blocking_spheres
-        # except AttributeError:
-        #     pass
-
-
-
-        output_widom = self.ctx.raspa_widom.outputs.output_parameters.get_dict()
-        output_gcmc = self.ctx.raspa_gcmc.outputs.output_parameters.get_dict()
-        result_dict['temperature'] = self.ctx.raspa_parameters["System"]['hkust1']["ExternalTemperature"]
-        result_dict['temperature_unit'] = "K"
-        result_dict['henry_coefficient_units'] = output_widom['hkust1']['components'][self.ctx.raspa_comp.comp1.name]['henry_coefficient_units']
-        result_dict['adsorption_energy_units'] = output_widom['hkust1']['components'][self.ctx.raspa_comp.comp1.name]['adsorption_energy_widom_units']
 
         for key, value in self.ctx.raspa_comp.items():
             if key in list(self.inputs.raspa_comp):
                 comp_name = value.name
+                zeopp_label = 'zeopp_{}'.format(comp_name)
+                output_zeo = self.ctx[zeopp_label].outputs.output_parameters.get_dict()
+                result_dict['POAV_Volume_fraction'][comp_name] = output_zeo['POAV_Volume_fraction']
+                result_dict['PONAV_Volume_fraction'][comp_name] = output_zeo['PONAV_Volume_fraction']
+                result_dict['POAV'][comp_name] = output_zeo['POAV_cm^3/g']
+                result_dict['GASA'][comp_name] = output_zeo['ASA_m^2/g']
+                result_dict['VASA'][comp_name] = output_zeo['ASA_m^2/cm^3']
+                result_dict['NGASA'][comp_name] = output_zeo['NASA_m^2/g']
+                result_dict['NVASA'][comp_name] = output_zeo['NASA_m^2/cm^3']
+                result_dict['Channel_surface_area'][comp_name] = output_zeo['Channel_surface_area_A^2']
+                result_dict['Pocket_surface_area'][comp_name] = output_zeo['Pocket_surface_area_A^2']
+                result_dict['number_blocking_spheres'][comp_name] = self.ctx.number_blocking_spheres[comp_name]
+                # TODO: Take it out of the loop!
+                result_dict['Density'] = output_zeo['Density']
+
+        # RASPA Section
+        output_widom = self.ctx.raspa_widom.outputs.output_parameters.get_dict()
+
+        result_dict['temperature'] = self.ctx.raspa_parameters["System"][self.inputs.structure.label]["ExternalTemperature"]
+
+        output_gcmc = self.ctx.raspa_gcmc.outputs.output_parameters.get_dict()
+        result_dict['temperature'] = self.ctx.raspa_parameters["System"]['hkust1']["ExternalTemperature"]
+        result_dict['temperature_unit'] = "K"
+        result_dict['henry_coefficient_units'] = output_widom[self.inputs.structure.label]['components'][self.ctx.raspa_comp.comp1.name]['henry_coefficient_units']
+        result_dict['adsorption_energy_units'] = output_widom[self.inputs.structure.label]['components'][self.ctx.raspa_comp.comp1.name]['adsorption_energy_widom_units']
+
+        for key, value in self.ctx.raspa_comp.items():
+            if key in list(self.inputs.raspa_comp):
+                comp_name = value.name
+                comp = output_widom[self.inputs.structure.label]['components'][comp_name]
                 mol_frac = value.mol_fraction
-                comp = output_widom['hkust1']['components'][comp_name]
                 result_dict['henry_coefficient_average'][comp_name] = comp['henry_coefficient_average']
                 result_dict['henry_coefficient_dev'][comp_name] = comp['henry_coefficient_dev']
                 result_dict['adsorption_energy_average'][comp_name] = comp['adsorption_energy_widom_average']
@@ -607,6 +663,7 @@ class SeparationWorkChain(WorkChain):
                 result_dict['conversion_factor_molec_uc_to_mol_kg'] = output_gcmc['hkust1']['components'][comp_name]['conversion_factor_molec_uc_to_mol_kg']
                 result_dict['mol_fraction'][comp_name] = float(mol_frac)
                 result_dict['isotherm_loading'][comp_name] = self.ctx.loading[comp_name]
+                result_dict['number_blocking_spheres'][comp_name] = self.ctx.number_blocking_spheres[comp_name]
 
         self.out("results", ParameterData(dict=result_dict).store())
         # self.out('blocking_spheres', self.ctx.zeopp_block['block'])

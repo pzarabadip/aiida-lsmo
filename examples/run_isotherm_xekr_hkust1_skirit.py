@@ -1,8 +1,8 @@
 import os
 from aiida.plugins import DataFactory
-from aiida.orm import Code, Dict, Float, Int, Str
+from aiida.orm import Code, Dict, Float, Int
 from aiida.engine import run, submit
-from aiida_lsmo_workflows.isotherm_multi_comp import MultiCompIsothermWorkChain
+from aiida_lsmo_workflows.isotherm_multi_comp import SeparationWorkChain
 
 ParameterData = DataFactory('dict')
 SinglefileData = DataFactory('singlefile')
@@ -13,19 +13,19 @@ structure = CifData(file=os.path.abspath("./HKUST1.cif"))
 structure.label = structure.filename.lower()[:-4]
 
 # Zeopp settings
-zeopp_code = Code.get_from_string('zeopp_teslin@teslin')
+zeopp_code = Code.get_from_string('zeopp@skirit')
 zeopp_probe_radius_co2_trappe = Float(2.0) #(Angs) It will create 8 pore blocks for test purpose
 zeopp_atomic_radii_file = SinglefileData(file=os.path.abspath("./UFF.rad")) # Radius file for the framework
 
 # RASPA settings
-raspa_code = Code.get_from_string('raspa_teslin@teslin')
+raspa_code = Code.get_from_string('raspa@skirit') 
 
 raspa_parameters = Dict(
     dict={
         "GeneralSettings": {
             "SimulationType": "MonteCarlo",
-            "NumberOfCycles": 100,
-            "NumberOfInitializationCycles": 200,
+            "NumberOfCycles": 10000,
+            "NumberOfInitializationCycles": 20000,
             "PrintEvery": 1000,
             "Forcefield": "GenericMOFs",
             "RemoveAtomNumberCodeFromLabel": True,
@@ -48,22 +48,16 @@ raspa_parameters = Dict(
                 "MoleculeDefinition": "TraPPE",
                 "CreateNumberOfMolecules": 0,
             },
-            "comp3": {
-                "MoleculeDefinition": "TraPPE",
-                "CreateNumberOfMolecules": 0,
-            },
         },
     })
 
 raspa_comp = {
-
-    'comp1':{'name':'xenon','mol_fraction':0.2,'radius':1.985, 'mol_def':'TraPPE'},
-    'comp2':{'name':'krypton','mol_fraction':0.8,'radius':1.986, 'mol_def':'TraPPE'}
-
+    'comp1':{'name':'xenon','mol_fraction':0.2,'radius':1.985},
+    'comp2':{'name':'krypton','mol_fraction':0.8,'radius':1.83}
     }
 
 
-submit(MultiCompIsothermWorkChain,
+submit(SeparationWorkChain,
     structure=structure,
     zeopp_code=zeopp_code,
     raspa_code=raspa_code,
@@ -71,9 +65,8 @@ submit(MultiCompIsothermWorkChain,
     raspa_isotherm_dynamic=False,
     raspa_isotherm_full=False,
     raspa_comp = raspa_comp,
-    selected_pressures=[0.15e5,0.55e5,1.05e5],
-    # zeopp_probe_radius=zeopp_probe_radius_co2_trappe,
+    selected_pressures=[0.1e5,0.5e5,1.0e5,2.0e5,5.0e5],
+    zeopp_probe_radius=zeopp_probe_radius_co2_trappe,
     zeopp_atomic_radii=zeopp_atomic_radii_file,
-    zeopp_accuracy=Str('DEF'),
     # label='SeparationWorkChain',
     )
