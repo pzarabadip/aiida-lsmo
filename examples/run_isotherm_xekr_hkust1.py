@@ -20,6 +20,10 @@ zeopp_atomic_radii_file = SinglefileData(file=os.path.abspath("./UFF.rad")) # Ra
 # RASPA settings
 raspa_code = Code.get_from_string('raspa_teslin@teslin')
 
+general_params = Dict(dict={
+    'zeopp' :{'pld_min' : 3.90,'lcd_max' : 15.0}
+})
+
 raspa_parameters = Dict(
     dict={
         "GeneralSettings": {
@@ -71,5 +75,6 @@ submit(MultiCompIsothermWorkChain,
     # zeopp_probe_radius=zeopp_probe_radius_co2_trappe,
     zeopp_atomic_radii=zeopp_atomic_radii_file,
     zeopp_accuracy=Str('DEF'),
+    general_params=general_params,
     # label='SeparationWorkChain',
     )

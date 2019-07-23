@@ -74,8 +74,10 @@ class MultiCompIsothermWorkChain(WorkChain):
         spec.input("zeopp_accuracy", valid_type=Str, default=Str('DEF'), required=False)
         spec.input("zeopp_block_samples_A3", valid_type=Int, default=Int(100), required=False) #100 samples / Ang^3: accurate for all the structures
         spec.input("zeopp_volpo_samples_UC", valid_type=Int, default=Int(100), required=False) #100k samples, may need more for structures bigger
-        spec.input("zeopp_lcd_max", valid_type=Float, default=Float(15.0), required=False)
-        spec.input("zeopp_pld_min", valid_type=Float, default=Float(3.9), required=False)
+        # spec.input("zeopp_lcd_max", valid_type=Float, default=Float(15.0), required=False)
+        # spec.input("zeopp_pld_min", valid_type=Float, default=Float(3.9), required=False)
+
+        spec.input("general_params", valid_type=Dict, required=False)
 
         # Workflow
         spec.outline(
@@ -105,6 +107,8 @@ class MultiCompIsothermWorkChain(WorkChain):
         """
         Initialize variables and setup screening protocol!
         """
+        # self.ctx.general_params = Dict(dict=self.inputs.general_params)
+        self.ctx.general_params = self.inputs.general_params
 
         self.ctx.zeopp_options = {
             "resources": {
@@ -175,8 +179,11 @@ class MultiCompIsothermWorkChain(WorkChain):
         structure.
         Note: The default setting is LCD < 7.0 A and PLD > 3.9 A.
         """
-        lcd_lim = self.inputs.zeopp_lcd_max.value
-        pld_lim = self.inputs.zeopp_pld_min.value
+        # lcd_lim = self.inputs.zeopp_lcd_max.value
+        # lcd_lim = self.ctx.general_params.zeopp.lcd_max
+        lcd_lim = self.ctx.general_params['zeopp']['lcd_max']
+        # pld_lim = self.inputs.zeopp_pld_min.value
+        pld_lim = self.ctx.general_params['zeopp']['pld_min']
         lcd_current = self.ctx.zeopp_res.outputs.output_parameters.get_dict()['Largest_included_sphere']
         pld_current = self.ctx.zeopp_res.outputs.output_parameters.get_dict()['Largest_free_sphere']
 
