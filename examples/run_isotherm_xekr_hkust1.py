@@ -48,10 +48,6 @@ raspa_parameters = Dict(
                 "MoleculeDefinition": "TraPPE",
                 "CreateNumberOfMolecules": 0,
             },
-            "comp3": {
-                "MoleculeDefinition": "TraPPE",
-                "CreateNumberOfMolecules": 0,
-            },
         },
     })
 

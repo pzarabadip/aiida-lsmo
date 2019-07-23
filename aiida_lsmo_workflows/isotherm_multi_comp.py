@@ -59,7 +59,7 @@ class MultiCompIsothermWorkChain(WorkChain):
         # spec.input("raspa_minKh_sel", valid_type=Float, default=Float(5.0), required=False)
         spec.input("raspa_verbosity", valid_type=Int, default=Int(10), required=False)
         spec.input("raspa_widom_cycle_mult", valid_type=Int, default=Int(10), required=False)
-        spec.input("raspa_num_of_components", valid_type=Int, default=Int(2), required=False)
+        # spec.input("raspa_num_of_components", valid_type=Int, default=Int(2), required=False)
         spec.input_namespace("raspa_comp", valid_type=dict,required=False, dynamic=True)
 
         spec.input("raspa_pressure_min", valid_type=Float, default=Float(0.1), required=False)
@@ -618,7 +618,9 @@ class MultiCompIsothermWorkChain(WorkChain):
         result_dict['NVASA_unit'] = "ASA_m^2/cm^3"
         result_dict['Channel_surface_area_unit'] = "A^2"
         result_dict['Pocket_surface_area_unit'] = "A^2"
-
+        result_dict['conversion_factor_molec_uc_to_cm3stp_cm3'] = {}
+        result_dict['conversion_factor_molec_uc_to_gr_gr'] = {}
+        result_dict['conversion_factor_molec_uc_to_mol_kg'] = {}
 
         for key, value in self.ctx.raspa_comp.items():
             if key in list(self.inputs.raspa_comp):
@@ -658,14 +660,21 @@ class MultiCompIsothermWorkChain(WorkChain):
                 result_dict['henry_coefficient_dev'][comp_name] = comp['henry_coefficient_dev']
                 result_dict['adsorption_energy_average'][comp_name] = comp['adsorption_energy_widom_average']
                 result_dict['adsorption_energy_dev'][comp_name] = comp['adsorption_energy_widom_dev']
-                result_dict['conversion_factor_molec_uc_to_cm3stp_cm3'] = output_gcmc['hkust1']['components'][comp_name]['conversion_factor_molec_uc_to_cm3stp_cm3']
-                result_dict['conversion_factor_molec_uc_to_gr_gr'][comp_name] = output_gcmc['hkust1']['components'][comp_name]['conversion_factor_molec_uc_to_gr_gr']
-                result_dict['conversion_factor_molec_uc_to_mol_kg'] = output_gcmc['hkust1']['components'][comp_name]['conversion_factor_molec_uc_to_mol_kg']
+                result_dict['conversion_factor_molec_uc_to_cm3stp_cm3'][comp_name] = output_gcmc[self.inputs.structure.label]['components'][comp_name]['conversion_factor_molec_uc_to_cm3stp_cm3']
+                result_dict['conversion_factor_molec_uc_to_gr_gr'][comp_name] = output_gcmc[self.inputs.structure.label]['components'][comp_name]['conversion_factor_molec_uc_to_gr_gr']
+                result_dict['conversion_factor_molec_uc_to_mol_kg'][comp_name] = output_gcmc[self.inputs.structure.label]['components'][comp_name]['conversion_factor_molec_uc_to_mol_kg']
                 result_dict['mol_fraction'][comp_name] = float(mol_frac)
                 result_dict['isotherm_loading'][comp_name] = self.ctx.loading[comp_name]
                 result_dict['number_blocking_spheres'][comp_name] = self.ctx.number_blocking_spheres[comp_name]
 
         self.out("results", ParameterData(dict=result_dict).store())
+
+        for key, value in self.ctx.raspa_comp.items():
+            if key in list(self.inputs.raspa_comp):
+                comp_name = value.name
+                zeopp_label = 'zeopp_{}'.format(comp_name)
+                bp_label = '_'.join((self.inputs.structure.label,comp_name))
+                self.out('blocking_spheres_{}'.format(comp_name), self.ctx[zeopp_label].outputs.block)
         # self.out('blocking_spheres', self.ctx.zeopp_block['block'])
         self.report("Workchain completed successfully")
         return
