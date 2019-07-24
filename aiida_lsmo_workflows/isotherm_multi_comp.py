@@ -50,34 +50,34 @@ class MultiCompIsothermWorkChain(WorkChain):
         # Raspa inputs
         spec.input("raspa_code", valid_type=Code, required=False)
         spec.input("raspa_parameters", valid_type=ParameterData, required=False)
-        spec.input("raspa_isotherm_dynamic", valid_type=bool, default=False, required=False, non_db=True)
-        spec.input("raspa_isotherm_full", valid_type=bool, default=False, required=False, non_db=True)
+        # spec.input("raspa_isotherm_dynamic", valid_type=bool, default=False, required=False, non_db=True)
+        # spec.input("raspa_isotherm_full", valid_type=bool, default=False, required=False, non_db=True)
         spec.input("raspa_usecharges", valid_type=bool, default=False, required=False, non_db=True)
         spec.input("raspa_charge_cif", valid_type=bool, default=False, required=False, non_db=True)
-        spec.input("raspa_cutoff", valid_type=Float, default=Float(12.0), required=False)
+        # spec.input("raspa_cutoff", valid_type=Float, default=Float(12.0), required=False)
         # spec.input("raspa_minKh", valid_type=Float, default=Float(1e-10), required=False)
         # spec.input("raspa_minKh_sel", valid_type=Float, default=Float(5.0), required=False)
-        spec.input("raspa_verbosity", valid_type=Int, default=Int(10), required=False)
-        spec.input("raspa_widom_cycle_mult", valid_type=Int, default=Int(10), required=False)
+        # spec.input("raspa_verbosity", valid_type=Int, default=Int(10), required=False)
+        # spec.input("raspa_widom_cycle_mult", valid_type=Int, default=Int(10), required=False)
         # spec.input("raspa_num_of_components", valid_type=Int, default=Int(2), required=False)
         spec.input_namespace("raspa_comp", valid_type=dict,required=False, dynamic=True)
 
-        spec.input("raspa_pressure_min", valid_type=Float, default=Float(0.1), required=False)
-        spec.input("raspa_pressure_max", valid_type=Float, default=Float(1.0), required=False)
+        # spec.input("raspa_pressure_min", valid_type=Float, default=Float(0.1), required=False)
+        # spec.input("raspa_pressure_max", valid_type=Float, default=Float(1.0), required=False)
         # TODO: Here we need to decide for different compoentns
         spec.input("raspa_molsatdens", valid_type=Float, required=False)
         spec.input("raspa_gcmc_press_precision", valid_type=Float, required=False)
         spec.input("raspa_gcmc_press_maxstep", valid_type=Float, required=False)
-        spec.input("selected_pressures", valid_type=list, required=False, non_db=True)
+        # spec.input("selected_pressures", valid_type=list, required=False, non_db=True)
 
         # Zeopp Extra Inputs
-        spec.input("zeopp_accuracy", valid_type=Str, default=Str('DEF'), required=False)
-        spec.input("zeopp_block_samples_A3", valid_type=Int, default=Int(100), required=False) #100 samples / Ang^3: accurate for all the structures
-        spec.input("zeopp_volpo_samples_UC", valid_type=Int, default=Int(100), required=False) #100k samples, may need more for structures bigger
+        # spec.input("zeopp_accuracy", valid_type=Str, default=Str('DEF'), required=False)
+        # spec.input("zeopp_block_samples_A3", valid_type=Int, default=Int(100), required=False) #100 samples / Ang^3: accurate for all the structures
+        # spec.input("zeopp_volpo_samples_UC", valid_type=Int, default=Int(100), required=False) #100k samples, may need more for structures bigger
         # spec.input("zeopp_lcd_max", valid_type=Float, default=Float(15.0), required=False)
         # spec.input("zeopp_pld_min", valid_type=Float, default=Float(3.9), required=False)
 
-        spec.input("general_params", valid_type=Dict, required=False)
+        spec.input("general_calc_params", valid_type=Dict, required=False)
 
         # Workflow
         spec.outline(
@@ -108,7 +108,7 @@ class MultiCompIsothermWorkChain(WorkChain):
         Initialize variables and setup screening protocol!
         """
         # self.ctx.general_params = Dict(dict=self.inputs.general_params)
-        self.ctx.general_params = self.inputs.general_params
+        self.ctx.general_calc_params = self.inputs.general_calc_params
 
         self.ctx.zeopp_options = {
             "resources": {
@@ -134,8 +134,8 @@ class MultiCompIsothermWorkChain(WorkChain):
         self.ctx.raspa_comp = AttributeDict(self.inputs.raspa_comp)
 
         #TODO: Adding zeopp parameters too.
-        self.ctx.raspa_pressure_min = self.inputs.raspa_pressure_min
-        self.ctx.raspa_pressure_max = self.inputs.raspa_pressure_max
+        # self.ctx.raspa_pressure_min = self.inputs.raspa_pressure_min
+        # self.ctx.raspa_pressure_max = self.inputs.raspa_pressure_max
 
 
     def run_pore_dia_zeopp(self):
@@ -145,7 +145,7 @@ class MultiCompIsothermWorkChain(WorkChain):
         # Required inputs
         params = {
             'res' : [self.inputs.structure.label + '.res'],
-            'ha'  : self.inputs.zeopp_accuracy.value
+            'ha'  : self.ctx.general_calc_params['zeopp']['accuracy']
         }
 
         parameters = NetworkParameters(dict=params)
@@ -179,11 +179,10 @@ class MultiCompIsothermWorkChain(WorkChain):
         structure.
         Note: The default setting is LCD < 7.0 A and PLD > 3.9 A.
         """
-        # lcd_lim = self.inputs.zeopp_lcd_max.value
-        # lcd_lim = self.ctx.general_params.zeopp.lcd_max
-        lcd_lim = self.ctx.general_params['zeopp']['lcd_max']
-        # pld_lim = self.inputs.zeopp_pld_min.value
-        pld_lim = self.ctx.general_params['zeopp']['pld_min']
+
+
+        lcd_lim = self.ctx.general_calc_params['zeopp']['lcd_max']
+        pld_lim = self.ctx.general_calc_params['zeopp']['pld_min']
         lcd_current = self.ctx.zeopp_res.outputs.output_parameters.get_dict()['Largest_included_sphere']
         pld_current = self.ctx.zeopp_res.outputs.output_parameters.get_dict()['Largest_free_sphere']
 
@@ -208,16 +207,16 @@ class MultiCompIsothermWorkChain(WorkChain):
                 params = {
                         'sa'   : [probe_radius,
                                   probe_radius,
-                                  self.inputs.zeopp_block_samples_A3.value,
+                                  self.ctx.general_calc_params['zeopp']['sa_samples'],
                                   self.inputs.structure.label + '_' + comp_name + '.sa'],
                         'volpo': [probe_radius,
                                   probe_radius,
-                                  self.inputs.zeopp_volpo_samples_UC.value,
+                                  self.ctx.general_calc_params['zeopp']['volpo_samples'],
                                   self.inputs.structure.label + '_' + comp_name + '.volpo'],
                         'block': [probe_radius,
-                                  self.inputs.zeopp_block_samples_A3.value,
+                                  self.ctx.general_calc_params['zeopp']['block_samples'],
                                   self.inputs.structure.label + '_' + comp_name + '.block'],
-                        'ha'   :  self.inputs.zeopp_accuracy.value
+                        'ha'   :  self.ctx.general_calc_params['zeopp']['accuracy']
                 }
 
                 # Required inputs
@@ -349,7 +348,7 @@ class MultiCompIsothermWorkChain(WorkChain):
                 #self.ctx.raspa_parameters["Component"][comp_name]["BlockPocketsFileName"]["self.inputs.structure.label"] = bp_label
                 #self.ctx.raspa_parameters["Component"][comp_name]["BlockPocketsFileName"] = bp_label
 
-        ucs = multiply_unit_cell(self.inputs.structure, self.inputs.raspa_cutoff.value)
+        ucs = multiply_unit_cell(self.inputs.structure, self.ctx.general_calc_params['raspa']['cutoff'])
         self.ctx.raspa_parameters['GeneralSettings']['UnitCells'] = "{} {} {}".format(ucs[0], ucs[1], ucs[2])
 
         # Turn on charges if requested
@@ -366,8 +365,8 @@ class MultiCompIsothermWorkChain(WorkChain):
         # CORRECT the settings to have only Widom insertion
         self.ctx.raspa_parameters["GeneralSettings"]["SimulationType"] = "MonteCarlo"
         self.ctx.raspa_parameters["GeneralSettings"]["NumberOfInitializationCycles"] = 0
-        self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"] = self.inputs.raspa_widom_cycle_mult.value * self.inputs.raspa_parameters.get_dict()["GeneralSettings"]["NumberOfCycles"]
-        self.ctx.raspa_parameters["GeneralSettings"]["PrintPropertiesEvery"] = int(self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"] / self.inputs.raspa_verbosity.value)
+        self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"] = self.ctx.general_calc_params['raspa']['widom_cycle_mult'] * self.inputs.raspa_parameters.get_dict()["GeneralSettings"]["NumberOfCycles"]
+        self.ctx.raspa_parameters["GeneralSettings"]["PrintPropertiesEvery"] = int(self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"] / self.ctx.general_calc_params['raspa']['verbosity'])
         self.ctx.raspa_parameters["GeneralSettings"]["PrintEvery"] = int(1e6) #never
         return
 
@@ -402,15 +401,7 @@ class MultiCompIsothermWorkChain(WorkChain):
                         self.ctx.raspa_parameters["Component"][comp_name]["BlockPocketsFileName"] = {}
                         self.ctx.raspa_parameters["Component"][comp_name]["BlockPocketsFileName"][self.inputs.structure.label] = bp_label
 
-                        # This creates a new node which is not linked to the source.
-                        # bp_comp = SinglefileData(file=bp_path).store()
-                        # inputs['block_pocket'][bp_label] = bp_comp
-                        # This still does not solve the issue and file is not being used.
-                        # inputs['block_pocket'][bp_label] = load_node(self.ctx[zeopp_label].outputs.block.uuid)
-
-                        # This creates the link but the file is not retrieved to be used.
                         inputs['block_pocket'][bp_label] = self.ctx[zeopp_label].outputs.block
-
 
                         self.report("({}) Blocking spheres are present for ({}) and used for Raspa".format(self.ctx.number_blocking_spheres[comp_name],comp_name))
                     else:
@@ -464,7 +455,7 @@ class MultiCompIsothermWorkChain(WorkChain):
         self.ctx.current_p_index = 0
         # self.ctx.restart_raspa_calc = None
 
-        if (self.inputs.raspa_isotherm_dynamic) and (self.inputs.raspa_isotherm_full):
+        if (self.ctx.general_calc_params['raspa']['isotherm_dynamic']) and (self.ctx.general_calc_params['raspa']['isotherm_full']):
             # Estimate the total loading qsat and choose the pressure points
             satDens = self.inputs.raspa_molsatdens.value #(mol/l)
             poreVol = self.ctx.zeopp_sv.outputs.output_parameters.get_dict()['POAV_cm^3/g'] #(cm3/g = l/kg)
@@ -475,24 +466,24 @@ class MultiCompIsothermWorkChain(WorkChain):
                 qst = self.ctx.estimated_qsat, #(mol/kg_frame)
                 dpa = self.inputs.raspa_gcmc_press_precision.value, #(kg*Pa/mol)
                 dpmax = self.inputs.raspa_gcmc_press_maxstep.value, #(Pa)
-                pmax = self.inputs.raspa_pressure_max.value, #(Pa)
-                pmin = self.inputs.raspa_pressure_min.value, #(Pa)
+                pmax = self.ctx.general_calc_params['raspa']['pressure_max'], #(Pa)
+                pmin = self.ctx.general_calc_params['raspa']['pressure_min'], #(Pa)
                 dynamic = self.inputs.raspa_isotherm_dynamic,
                 full = self.inputs.raspa_isotherm_full,
                 )
-        elif (not self.inputs.raspa_isotherm_dynamic) and (self.inputs.raspa_isotherm_full):
+        elif (not self.ctx.general_calc_params['raspa']['isotherm_dynamic']) and (self.ctx.general_calc_params['raspa']['isotherm_full']):
             self.ctx.pressures = choose_pressure_points(
-                pmin = self.self.inputs.raspa_pressure_min.value,
+                pmin = self.ctx.general_calc_params['raspa']['pressure_min'],
                 dpa = self.inputs.raspa_gcmc_press_precision.value,
-                pmax = self.inputs.raspa_pressure_max.value,
+                pmax = self.ctx.general_calc_params['raspa']['pressure_max'],
                 dynamic = self.inputs.raspa_isotherm_dynamic,
                 full = self.inputs.raspa_isotherm_full,
             )
         else:
             self.ctx.pressures = choose_pressure_points(
-                selected_pressures = self.inputs.selected_pressures,
-                dynamic = self.inputs.raspa_isotherm_dynamic,
-                full = self.inputs.raspa_isotherm_full,
+                selected_pressures = self.ctx.general_calc_params['raspa']['selected_pressures'],
+                dynamic = self.ctx.general_calc_params['raspa']['isotherm_dynamic'],
+                full = self.ctx.general_calc_params['raspa']['isotherm_full'],
             )
 
         self.report("{} number of points are chosen for isotherm construction".format(len(self.ctx.pressures)))
@@ -501,7 +492,7 @@ class MultiCompIsothermWorkChain(WorkChain):
         self.ctx.raspa_parameters["GeneralSettings"]["NumberOfInitializationCycles"] = self.inputs.raspa_parameters.get_dict()["GeneralSettings"]["NumberOfInitializationCycles"]
         self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"] = self.inputs.raspa_parameters.get_dict()["GeneralSettings"]["NumberOfCycles"]
         self.ctx.raspa_parameters["GeneralSettings"]["PrintPropertiesEvery"] = int(1e6) #never
-        self.ctx.raspa_parameters["GeneralSettings"]["PrintEvery"] = int(self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"]/self.inputs.raspa_verbosity.value)
+        self.ctx.raspa_parameters["GeneralSettings"]["PrintEvery"] = int(self.ctx.raspa_parameters["GeneralSettings"]["NumberOfCycles"]/self.ctx.general_calc_params['raspa']['verbosity'])
         #TODO: Using for loop here to prevent repeating everthing.
 
         for key, value in self.ctx.raspa_comp.items():
@@ -533,7 +524,7 @@ class MultiCompIsothermWorkChain(WorkChain):
         """
 
         pressure = self.ctx.pressures[self.ctx.current_p_index]
-        self.ctx.raspa_parameters['System']['hkust1']['ExternalPressure'] = pressure
+        self.ctx.raspa_parameters['System'][self.inputs.structure.label]['ExternalPressure'] = pressure
         # Create the input dictionary
         inputs = {
             'framework'  : {self.inputs.structure.label:self.inputs.structure},

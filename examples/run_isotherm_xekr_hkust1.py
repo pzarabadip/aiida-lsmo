@@ -20,9 +20,27 @@ zeopp_atomic_radii_file = SinglefileData(file=os.path.abspath("./UFF.rad")) # Ra
 # RASPA settings
 raspa_code = Code.get_from_string('raspa_teslin@teslin')
 
-general_params = Dict(dict={
-    'zeopp' :{'pld_min' : 3.90,'lcd_max' : 15.0}
-})
+general_calc_params = Dict(dict={
+    'zeopp' :{
+                'pld_min' : 3.90,
+                'lcd_max' : 15.0,
+                'volpo_samples': 100,
+                'sa_samples' : 100,
+                'block_samples': 100,
+                'accuracy' : 'DEF'
+    },
+    'raspa' :{
+                'pressure_min' : 0.1,
+                'pressure_max' : 1.0,
+                'widom_cycle_mult' : 10,
+                'verbosity' : 10,
+                'cutoff' : 12.0,
+                'isotherm_dynamic' : False,
+                'isotherm_full' : False,
+                'selected_pressures': [0.1e5,0.5e5,1.0e5],
+    },
+}
+)
 
 raspa_parameters = Dict(
     dict={
@@ -68,13 +86,13 @@ submit(MultiCompIsothermWorkChain,
     zeopp_code=zeopp_code,
     raspa_code=raspa_code,
     raspa_parameters=raspa_parameters,
-    raspa_isotherm_dynamic=False,
-    raspa_isotherm_full=False,
+    # raspa_isotherm_dynamic=False,
+    # raspa_isotherm_full=False,
     raspa_comp = raspa_comp,
-    selected_pressures=[0.15e5,0.55e5,1.05e5],
+    # selected_pressures=[0.15e5,0.55e5,1.05e5],
     # zeopp_probe_radius=zeopp_probe_radius_co2_trappe,
     zeopp_atomic_radii=zeopp_atomic_radii_file,
-    zeopp_accuracy=Str('DEF'),
-    general_params=general_params,
+    # zeopp_accuracy=Str('DEF'),
+    general_calc_params=general_calc_params,
     # label='SeparationWorkChain',
     )
