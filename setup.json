@@ -1,7 +1,7 @@
 {
     "version": "0.1",
     "name": "aiida-lsmo-workflows",
-    "author": "Aliaksandr Yakutovich, Daniele Ongari",
+    "author": "Aliaksandr Yakutovich, Daniele Ongari, Pezhman Zarabadi-Poor",
     "author_email": "aliaksandr.yakutovich@epfl.ch",
     "description": "AiiDA workflows for the LSMO laboratory at EPFL",
     "url": "https://github.com/yakutovicha/aiida-lsmo-workflows",
@@ -12,11 +12,11 @@
     "setup_requires": ["reentry"],
     "reentry_register": true,
     "install_requires": [
-        "aiida-core == 1.0.0b4"
+        "aiida-core == 1.0.0b5"
     ],
     "entry_points": {
         "aiida.workflows": [
-            "aiida_lsmo_workflows.isotherm_multi_comp=aiida_lsmo_workflows.isotherm_multi_comp:MultiCompIsothermWorkChain"
+            "aiida_lsmo_workflows.isotherm_multi_comp_serial=aiida_lsmo_workflows.isotherm_multi_comp_serial:MultiCompIsothermWorkChain"
             ]
     }
 }

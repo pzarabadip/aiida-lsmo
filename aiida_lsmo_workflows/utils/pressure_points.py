@@ -14,8 +14,8 @@ def choose_pressure_points(**kwargs):
 
     if dynamic and full:
         Kh = kwargs.pop('Kh')
-        qst = kwargs.pop('qsat')
-        dpmax - kwargs.pop('dpmax')
+        qsat = kwargs.pop('qsat')
+        dpmax = kwargs.pop('dpmax')
         pmin = kwargs.pop('pmin')
         dpa = kwargs.pop('dpa')
         pmax = kwargs.pop('pmax')
