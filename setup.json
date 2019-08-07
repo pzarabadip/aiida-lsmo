@@ -16,7 +16,8 @@
     ],
     "entry_points": {
         "aiida.workflows": [
-            "aiida_lsmo_workflows.isotherm_multi_comp_serial=aiida_lsmo_workflows.isotherm_multi_comp_serial:MultiCompIsothermWorkChain"
+            "aiida_lsmo_workflows.isotherm_multi_comp_serial=aiida_lsmo_workflows.isotherm_multi_comp_serial:MultiCompIsothermWorkChain",
+            "aiida_lsmo_workflows.gemc=aiida_lsmo_workflows.gemc:GEMCWorkChain"
             ]
     }
 }

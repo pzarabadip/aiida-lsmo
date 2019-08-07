@@ -107,7 +107,6 @@ class GEMCWorkChain(WorkChain):
         Initializing RASPA parameters for GEMC.
         """
         self.ctx.current_T_index = self.ctx.init_T_index
-        self.ctx.restart_raspa_calc = None
         # Create a deepcopy of the user parameters, to modify before submission
         self.ctx.raspa_parameters = deepcopy(self.inputs.raspa_parameters.get_dict())
 
@@ -141,7 +140,7 @@ class GEMCWorkChain(WorkChain):
             self.ctx.raspa_parameters["Component"][comp_name]["TranslationProbability"] = 0.5
             if not singlebead:
                 self.ctx.raspa_parameters["Component"][comp_name]["RotationProbability"] = 0.5
-            self.ctx.raspa_parameters["Component"][comp_name]["ReinsertionProbability"] = 0.5
+            # self.ctx.raspa_parameters["Component"][comp_name]["ReinsertionProbability"] = 0.5
             self.ctx.raspa_parameters["Component"][comp_name]["CreateNumberOfMolecules"]["box_one"] = number_box_one
             self.ctx.raspa_parameters["Component"][comp_name]["CreateNumberOfMolecules"]["box_two"] = number_box_two
 
@@ -180,8 +179,8 @@ class GEMCWorkChain(WorkChain):
             }
         }
         # Handling the retrive and usage of restart feature.
-        if self.ctx.restart_raspa_calc is not None:
-           inputs['retrieved_parent_folder'] = self.ctx.restart_raspa_calc
+        # if self.ctx.restart_raspa_calc is not None:
+           # inputs['retrieved_parent_folder'] = self.ctx.restart_raspa_calc
 
         # Storing parameters, and submittig the process.
         inputs["parameters"] = ParameterData(dict=self.ctx.raspa_parameters).store()
@@ -204,7 +203,6 @@ class GEMCWorkChain(WorkChain):
         else:
             min_image_stat = []
             output_gemc = self.ctx.raspa_gemc.outputs.output_parameters.get_dict()
-            # self.ctx.restart_raspa_calc = self.ctx.raspa_gemc.outputs['retrieved']
             for key, value in self.ctx.raspa_box.items():
                 tag = value.tag
                 box_ax = output_gemc[tag]['general']['box_ax']
@@ -229,40 +227,10 @@ class GEMCWorkChain(WorkChain):
                 # Update the box
                 for key, value in self.ctx.raspa_box.items():
                     box_tag = value.tag
-                    #length_string = self.ctx.raspa_parameters["System"][box_tag]["BoxLengths"]
-                    length_string = self.ctx.raspa_gemc.inputs.parameters.get_dict()["System"][box_tag]["BoxLengths"]
-                    box_length = []
-                    for t in length_string.split():
-                        try:
-                            box_length.append(float(t))
-                        except ValueError:
-                            pass
-                    box_ax_new = box_length[0] + 1.0
-                    box_by_new = box_length[1] + 1.0
-                    box_cz_new = box_length[2] + 1.0
-                    self.ctx.raspa_parameters["System"][box_tag]["BoxLengths"] = "{} {} {}".format(box_ax_new, box_by_new, box_cz_new)
-
-
-                # length_string = self.ctx.raspa_parameters["System"][box_tag]["BoxLengths"]
-                # box_length = []
-                # for t in length_string.split():
-                #     try:
-                #         box_length.append(float(t))
-                #     except ValueError:
-                #         pass
-                # box_ax_new = box_length[0] + 1.0
-                # box_by_new = box_length[1] + 1.0
-                # box_cz_new = box_length[2] + 1.0
-                # for key, value in self.ctx.raspa_box.items():
-                #     box_tag = value.tag
-                #     box_ax = value.box_ax + 2.0
-                #     box_by = value.box_by + 2.0
-                #     box_cz = value.box_cz + 2.0
-                # self.ctx.raspa_parameters["System"][box_tag]["BoxLengths"] = "{} {} {}".format(box_ax_new, box_by_new, box_cz_new)
-                # for key, value in self.ctx.raspa_comp.items():
-                #     comp_name = value.name
-                #     self.ctx.raspa_parameters["Component"][comp_name]["CreateNumberOfMolecules"]["box_one"] = 0
-                #     self.ctx.raspa_parameters["Component"][comp_name]["CreateNumberOfMolecules"]["box_two"] = 0
+                    box_ax = value.box_ax + 2.0
+                    box_by = value.box_by + 2.0
+                    box_cz = value.box_cz + 2.0
+                    self.ctx.raspa_parameters["System"][box_tag]["BoxLengths"] = "{} {} {}".format(box_ax, box_by, box_cz)
                 ParameterData(dict=self.ctx.raspa_parameters).store()
                 self.report("Ooops! You need to increase the box lengths.")
                 self.report("Increasing the cell dimension")
@@ -291,7 +259,7 @@ class GEMCWorkChain(WorkChain):
             # Iterating over components and check the convergences.
             converged = []
             output_gemc = self.ctx.raspa_gemc.outputs.output_parameters.get_dict()
-            self.ctx.restart_raspa_calc = self.ctx.raspa_gemc.outputs['retrieved']
+            # self.ctx.restart_raspa_calc = self.ctx.raspa_gcmc.outputs['retrieved']
             for key, value in self.ctx.raspa_box.items():
                 for k, v in self.ctx.raspa_comp.items():
                     comp_name = v.name
@@ -345,54 +313,29 @@ class GEMCWorkChain(WorkChain):
         """
         temperature = self.ctx.temperature[0][self.ctx.current_T_index]
         output_gemc = self.ctx.raspa_gemc.outputs.output_parameters.get_dict()
-        # self.report("{} Current -- {} Initial".format(self.ctx.current_T_index,self.ctx.init_T_index))
+        self.report("{} Current -- {} Initial".format(self.ctx.current_T_index,self.ctx.init_T_index))
 
         # Creating the loading empty dictionary only at first run.
         if self.ctx.current_T_index == self.ctx.init_T_index:
-            # self.report("creating the dictionary")
+            self.report("creating the dictionary")
             self.ctx.density = {}
-            self.ctx.density["vapor"] = {}
-            self.ctx.density["liquid"] = {}
-            for key, value in self.ctx.raspa_comp.items():
-                comp_name = value.name
-                self.ctx.density["vapor"][comp_name] = []
-                self.ctx.density["liquid"][comp_name] = []
-                # self.ctx.density[self.ctx.raspa_box.box1.tag][comp_name] = []
-                # self.ctx.density[self.ctx.raspa_box.box2.tag][comp_name] = []
-
-        for key, value in self.ctx.raspa_comp.items():
-            comp_name = value.name
-            adsorbate_density_average_one = output_gemc[self.ctx.raspa_box.box1.tag]["components"][comp_name]["adsorbate_density_average"]
-            adsorbate_density_dev_one = output_gemc[self.ctx.raspa_box.box1.tag]["components"][comp_name]["adsorbate_density_dev"]
-            adsorbate_density_average_two = output_gemc[self.ctx.raspa_box.box2.tag]["components"][comp_name]["adsorbate_density_average"]
-            adsorbate_density_dev_two = output_gemc[self.ctx.raspa_box.box2.tag]["components"][comp_name]["adsorbate_density_dev"]
-            if adsorbate_density_average_one < adsorbate_density_average_two:
-                self.ctx.density["vapor"][comp_name].append([temperature,adsorbate_density_average_one,adsorbate_density_dev_one])
-                self.ctx.density["liquid"][comp_name].append([temperature,adsorbate_density_average_two,adsorbate_density_dev_two])
-            else:
-                self.ctx.density["vapor"][comp_name].append([temperature,adsorbate_density_average_two,adsorbate_density_dev_two])
-                self.ctx.density["liquid"][comp_name].append([temperature,adsorbate_density_average_one,adsorbate_density_dev_one])
-            # self.ctx.density[self.ctx.raspa_box.box1.tag][comp_name].append([temperature,adsorbate_density_average_one,adsorbate_density_dev_one])
-            # self.ctx.density[self.ctx.raspa_box.box2.tag][comp_name].append([temperature,adsorbate_density_average_two,adsorbate_density_dev_two])
-
-
-            # for key, value in self.ctx.raspa_box.items():
-            #     for k,v in self.ctx.raspa_comp.items():
-            #         comp_name = v.name
-            #         tag = value.tag
-            #         self.ctx.density[comp_name]= {}
-            #         self.ctx.density[comp_name][tag] = []
-            #         self.report("creating nested dictionary")
+            for key, value in self.ctx.raspa_box.items():
+                for k,v in self.ctx.raspa_comp.items():
+                    comp_name = v.name
+                    tag = value.tag
+                    self.ctx.density[comp_name]= {}
+                    self.ctx.density[comp_name][tag] = []
+                    self.report("creating nested dictionary")
 
         # Iterating over components and append the loadings and
         # error bars to the dictionary.
-        # for key, value in self.ctx.raspa_box.items():
-        #     for k,v in self.ctx.raspa_comp.items():
-        #         comp_name = v.name
-        #         tag = value.tag
-        #         adsorbate_density_average = output_gemc[tag]["components"][comp_name]["adsorbate_density_average"]
-        #         adsorbate_density_dev = output_gemc[tag]["components"][comp_name]["adsorbate_density_dev"]
-        #         self.ctx.density[comp_name][tag].append([temperature,adsorbate_density_average,adsorbate_density_dev])
+        for key, value in self.ctx.raspa_box.items():
+            for k,v in self.ctx.raspa_comp.items():
+                comp_name = v.name
+                tag = value.tag
+                adsorbate_density_average = output_gemc[tag]["components"][comp_name]["adsorbate_density_average"]
+                adsorbate_density_dev = output_gemc[tag]["components"][comp_name]["adsorbate_density_dev"]
+                self.ctx.density[comp_name][tag].append([temperature,adsorbate_density_average,adsorbate_density_dev])
 
         # Simulation is converged that we are parsing. Increase the pressure index.
         if self.ctx.uphill:
@@ -400,7 +343,7 @@ class GEMCWorkChain(WorkChain):
             if self.ctx.current_T_index > self.ctx.max_T_index:
                 self.ctx.uphill = False
                 self.ctx.downhill = True
-                self.ctx.current_T_index = self.ctx.init_T_index - 1
+                self.ctx.current_T_index = self.init_T_index - 1
         elif self.ctx.downhill:
             self.ctx.current_T_index -= 1
             if self.ctx.current_T_index < self.ctx.min_T_index:
@@ -418,29 +361,22 @@ class GEMCWorkChain(WorkChain):
         try:
             # Getting the output parameters of converged GCMC calculation.
             output_gemc = self.ctx.raspa_gemc.outputs.output_parameters.get_dict()
-            result_dict["adsorbate_density"] = {}
-            result_dict["adsorbate_density"]["vapor"] = {}
-            result_dict["adsorbate_density"]["liquid"] = {}
+            result_dict["density"] = {}
             result_dict["header"] = ["Temperature(K)", "Density_average(kg/m^3)", "Density_deviation(kg/m^3)"]
-            for key, value in self.ctx.raspa_comp.items():
-                comp_name = value.name
-                result_dict["adsorbate_density"]["vapor"][comp_name] = self.ctx.density["vapor"][comp_name]
-                result_dict["adsorbate_density"]["liquid"][comp_name] = self.ctx.density["liquid"][comp_name]
-
             # Creating the needed keys within the result dictionary for RASPA Widom results.
-            # for key, value in self.ctx.raspa_box.items():
-            #     for k,v in self.ctx.raspa_comp.items():
-            #         comp_name = v.name
-            #         tag = value.tag
-            #         result_dict["density"][comp_name] = {}
-            #         result_dict["density"][comp_name][tag] = {}
+            for key, value in self.ctx.raspa_box.items():
+                for k,v in self.ctx.raspa_comp.items():
+                    comp_name = v.name
+                    tag = value.tag
+                    result_dict["density"][comp_name] = {}
+                    result_dict["density"][comp_name][tag] = {}
 
             # Iterating over components and extract results.
-            # for key, value in self.ctx.raspa_box.items():
-            #     for k,v in self.ctx.raspa_comp.items():
-            #         comp_name = v.name
-            #         tag = value.tag
-            #         result_dict["adsorbate_density"] = self.ctx.density[comp_name][tag]
+            for key, value in self.ctx.raspa_box.items():
+                for k,v in self.ctx.raspa_comp.items():
+                    comp_name = v.name
+                    tag = value.tag
+                    result_dict["adsorbate_density"][comp_name][tag] = self.ctx.density[comp_name][tag]
 
         except AttributeError:
             pass
