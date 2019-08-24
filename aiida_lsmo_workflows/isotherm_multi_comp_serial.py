@@ -111,7 +111,7 @@ class MultiCompIsothermWorkChain(WorkChain):
         # Required inputs
         ha_flag = self.ctx.general_calc_params["zeopp"]["accuracy"]
         params = {
-            "res" : [self.inputs.structure.label + ".res"],
+            "res" : True,
             "ha"  : ha_flag
         }
 
@@ -174,15 +174,12 @@ class MultiCompIsothermWorkChain(WorkChain):
                 params = {
                         "sa"   : [probe_radius,
                                   probe_radius,
-                                  self.ctx.general_calc_params["zeopp"]["sa_samples"],
-                                  self.inputs.structure.label + "_" + comp_name + ".sa"],
+                                  self.ctx.general_calc_params["zeopp"]["sa_samples"]],
                         "volpo": [probe_radius,
                                   probe_radius,
-                                  self.ctx.general_calc_params["zeopp"]["volpo_samples"],
-                                  self.inputs.structure.label + "_" + comp_name + ".volpo"],
+                                  self.ctx.general_calc_params["zeopp"]["volpo_samples"]],
                         "block": [probe_radius,
-                                  self.ctx.general_calc_params["zeopp"]["block_samples"],
-                                  self.inputs.structure.label + "_" + comp_name + ".block"],
+                                  self.ctx.general_calc_params["zeopp"]["block_samples"]],
                         "ha"   :  ha_flag
                 }
 
@@ -309,7 +306,12 @@ class MultiCompIsothermWorkChain(WorkChain):
                 comp_name = value.name
                 zeopp_label = "zeopp_{}".format(comp_name)
                 bp_label = "_".join((self.inputs.structure.label,comp_name))
-                bp_path = os.path.join(self.ctx[zeopp_label].outputs.retrieved._repository._get_base_folder().abspath, bp_label + ".block")
+                # bp_path = os.path.join(self.ctx[zeopp_label].outputs.retrieved._repository._get_base_folder().abspath, bp_label + ".block")
+                # bp_dir = self.ctx[zeopp_label].outputs.block._repository._get_base_folder().abspath
+                bp_dir = self.ctx[zeopp_label].outputs.retrieved._repository._get_base_folder().abspath
+                new_filename = bp_label + ".block"
+                os.rename(os.path.join(bp_dir,"out.block"), os.path.join(bp_dir,new_filename))
+                bp_path = os.path.join(bp_dir, bp_label + ".block")
 
                 with open(bp_path, "r") as block_file:
                     self.ctx.number_blocking_spheres[comp_name] = int(block_file.readline().strip())
