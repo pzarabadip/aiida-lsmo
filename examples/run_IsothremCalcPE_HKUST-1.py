@@ -1,6 +1,6 @@
 #!/usr/bin/env python  # pylint: disable=invalid-name
 # -*- coding: utf-8 -*-
-"""Run example isotherm calculation with HKUST1 framework."""
+"""Run example PE calculation calculation with HKUST1 framework."""
 
 from __future__ import absolute_import
 from __future__ import print_function
@@ -10,10 +10,10 @@ import click
 
 from aiida.engine import run
 from aiida.plugins import DataFactory, WorkflowFactory
-from aiida.orm import Code, Dict, Str
+from aiida.orm import Code, Dict
 
 # Workchain objects
-IsothermWorkChain = WorkflowFactory('lsmo.isotherm')  # pylint: disable=invalid-name
+IsothermCalcPEWorkChain = WorkflowFactory('lsmo.isotherm_calc_pe')  # pylint: disable=invalid-name
 
 # Data objects
 CifData = DataFactory('cif')  # pylint: disable=invalid-name
@@ -25,9 +25,9 @@ NetworkParameters = DataFactory('zeopp.parameters')  # pylint: disable=invalid-n
 @click.argument('zeopp_code_label')
 def main(raspa_code_label, zeopp_code_label):
     """Prepare inputs and submit the Isotherm workchain.
-    Usage: verdi run run_isotherm_hkust1.py raspa@localhost network@localhost"""
+    Usage: verdi run run_IsothremCalcPE_HKUST-1.py raspa@localhost zeopp@localhost"""
 
-    builder = IsothermWorkChain.get_builder()
+    builder = IsothermCalcPEWorkChain.get_builder()
 
     builder.metadata.label = "test"
 
@@ -47,18 +47,17 @@ def main(raspa_code_label, zeopp_code_label):
     builder.zeopp.metadata.options = options
 
     builder.structure = CifData(file=os.path.abspath('data/HKUST-1.cif'), label="HKUST-1")
-    builder.molecule = Str('co2')
     builder.parameters = Dict(
         dict={
-            'forcefield': 'UFF',  # Default: UFF
-            'temperature': 400,  # (K) Note: higher temperature will have less adsorbate and it is faster
-            'zeopp_volpo_samples': 1000,  # Default: 1e5 *NOTE: default is good for standard real-case!
+            'forcefield': 'UFF',
+            'temperature': 400,  # WARNING: use 300 K for real PE calculation!
+            'zeopp_volpo_samples': 1000,  # Default: 1e5
             'zeopp_block_samples': 10,  # Default: 100
             'raspa_widom_cycles': 100,  # Default: 1e5
-            'raspa_gcmc_init_cycles': 10,  # Default: 1e3
-            'raspa_gcmc_prod_cycles': 100,  # Default: 1e4
+            'raspa_gcmc_init_cycles': 100,  # Default: 1e3
+            'raspa_gcmc_prod_cycles': 1000,  # Default: 1e4
             'pressure_min': 0.001,  # Default: 0.001 (bar)
-            'pressure_max': 3,  # Default: 10 (bar)
+            'pressure_max': 10,  # WARNING: use 30 bar for real PE calculation!
         })
 
     run(builder)

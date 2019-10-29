@@ -1,0 +1,16 @@
+comp1:
+  name: CO2          # Raspa's MoleculeName
+  forcefield: TraPPE # Raspa's MoleculeDefinition
+  molfraction: 0.15  # Raspa's MolFraction
+  proberad: 1.525    # radius used for computing VOLPO and Block (Angs)
+  singlebead: False  # if true: RotationProbability=0
+  charged: True      # if true: ChargeMethod=Ewald
+
+comp2:
+  name: N2
+  forcefield: TraPPE
+  molfraction: 0.85
+  proberad: 1.655
+  singlebead: False
+  charged: True
+  
