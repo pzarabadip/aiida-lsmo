@@ -47,10 +47,10 @@ def main(raspa_code_label, zeopp_code_label):
     builder.zeopp.metadata.options = options
 
     builder.structure = CifData(file=os.path.abspath('data/HKUST-1.cif'), label="HKUST-1")
-    builder.mixture = Str('xe_kr')
+    builder.mixture = Str('flue_gas')
     builder.parameters = Dict(
         dict={
-            'forcefield': 'UFF_trun',  # Default: UFF
+            'forcefield': 'UFF',  # Default: UFF
             'temperature': 298,  # (K) Note: higher temperature will have less adsorbate and it is faster
             'zeopp_volpo_samples': 1000,  # Default: 1e5 *NOTE: default is good for standard real-case!
             'zeopp_sa_samples': 1000,  # Default: 1e5 *NOTE: default is good for standard real-case!
@@ -58,10 +58,10 @@ def main(raspa_code_label, zeopp_code_label):
             'raspa_widom_cycles': 100,  # Default: 1e5
             'raspa_gcmc_init_cycles': 10,  # Default: 1e3
             'raspa_gcmc_prod_cycles': 100,  # Default: 1e4
-            'pressure_list':[1.0e5, 2.0e5]
+            'pressure_list': [1.0, 2.0]
         })
 
-    run(builder)
+    submit(builder)
 
 
 if __name__ == '__main__':

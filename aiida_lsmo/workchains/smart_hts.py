@@ -7,10 +7,11 @@ import six
 
 # AiiDA modules
 from aiida.plugins import CalculationFactory, DataFactory, WorkflowFactory
-from aiida.orm import Dict, Float, Int, List, Str, SinglefileData
+from aiida.orm import Bool, Dict, Float, Int, List, Str, SinglefileData
 from aiida.engine import calcfunction
-from aiida.engine import ToContext, WorkChain, if_, while_
+from aiida.engine import ToContext, WorkChain, append_, if_, while_
 from aiida_lsmo.utils import aiida_dict_merge, check_resize_unit_cell
+from six.moves import range
 
 RaspaBaseWorkChain = WorkflowFactory('raspa.base')
 
@@ -31,6 +32,7 @@ def get_components_dict(mixture_name):
         mixture_dict = yaml.safe_load(stream)
     return Dict(dict=mixture_dict)
 
+
 @calcfunction
 def get_atomic_radii(htsparam):
     """Get {forcefield}.rad as SinglefileData form workchain/isotherm_data"""
@@ -38,28 +40,28 @@ def get_atomic_radii(htsparam):
     fullfilename = htsparam['forcefield'] + ".rad"
     return SinglefileData(file=os.path.join(thisdir, "isotherm_data", fullfilename))
 
+
 @calcfunction
 def get_zeopp_parameters(components, htsparams, probrad):
     """Get the ZeoppParameters from the inputs of the workchain"""
-    # probe_rad = components[comp.value]['probrad']
     probe_rad = probrad.value
     param_dict = {
         'ha': 'DEF',
         'res': True,
-        'sa' : [probe_rad, probe_rad, htsparams['zeopp_sa_samples']],
+        'sa': [probe_rad, probe_rad, htsparams['zeopp_sa_samples']],
         'volpo': [probe_rad, probe_rad, htsparams['zeopp_volpo_samples']],
         'block': [probe_rad, htsparams['zeopp_block_samples']],
     }
     return ZeoppParameters(dict=param_dict)
 
+
 @calcfunction
 def get_geometric_output(zeopp_out):
     """Return the geometric_output Dict from Zeopp results, including Qsat and is_porous"""
     geometric_output = zeopp_out.get_dict()
-    geometric_output.update({
-        'is_porous': geometric_output["POAV_A^3"] > 0.000
-    })
+    geometric_output.update({'is_porous': geometric_output["POAV_A^3"] > 0.000})
     return Dict(dict=geometric_output)
+
 
 @calcfunction
 def choose_pressure_points(inp_param):
@@ -71,6 +73,83 @@ def choose_pressure_points(inp_param):
     else:
         raise Exception('Pressue list is not provided!')
     return List(list=pressure_points)
+
+
+@calcfunction
+def get_isotherm_output(should_run_gcmc, parameters, components, pressures, **all_raspa_out_dict):
+    """ Extract Widom and GCMC results to isotherm Dict """
+
+    isotherm_output = {
+        'temperature': parameters['temperature'],
+        'temperature_unit': 'K',
+        'henry_coefficient_unit': 'mol/kg/Pa',
+        'adsorption_energy_widom_unit': 'kJ/mol',
+    }
+
+    widom_labels = [
+        'henry_coefficient_average',
+        'henry_coefficient_dev',
+        'adsorption_energy_widom_average',
+        'adsorption_energy_widom_dev',
+    ]
+
+    for label in widom_labels:
+        isotherm_output[label] = {}
+
+    for key, value in components.get_dict().items():
+        comp = value['name']
+        widom_label = "widom_{}".format(comp)
+        output_widom = all_raspa_out_dict[widom_label].get_dict()
+        for label in widom_labels:
+            isotherm_output[label][comp] = output_widom['framework_1']['components'][comp][label]
+
+    if should_run_gcmc:
+        isotherm = {}
+        multi_comp_isotherm_labels = [
+            'loading_absolute_average',
+            'loading_absolute_dev',
+            'enthalpy_of_adsorption_average',
+            'enthalpy_of_adsorption_dev',
+        ]
+        general_labels = [
+            'mol_fraction', "conversion_factor_molec_uc_to_cm3stp_cm3", "conversion_factor_molec_uc_to_gr_gr",
+            "conversion_factor_molec_uc_to_mol_kg"
+        ]
+        isotherm_output.update({
+            'pressure': pressures,
+            'pressure_unit': 'bar',
+            'loading_absolute_unit': 'mol/kg',
+            'enthalpy_of_adsorption_unit': 'kJ/mol'
+        })
+        for label in multi_comp_isotherm_labels:
+            isotherm[label] = {}
+        for label in general_labels:
+            isotherm_output[label] = {}
+
+        conv_ener = 1.0 / 120.273  # K to kJ/mol
+        for i in range(len(pressures)):
+            gcmc_out = all_raspa_out_dict['RaspaGCMC_{}'.format(i + 1)]["framework_1"]
+            for key, value in components.get_dict().items():
+                comp = value['name']
+                conv_load = gcmc_out['components'][comp]["conversion_factor_molec_uc_to_mol_kg"]
+                for label in ['loading_absolute_average', 'loading_absolute_dev']:
+                    if i == 0:
+                        isotherm[label][comp] = []
+                    isotherm[label][comp].append(conv_load * gcmc_out['components'][comp][label])
+
+                for label in ['enthalpy_of_adsorption_average', 'enthalpy_of_adsorption_dev']:
+                    if i == 0:
+                        isotherm[label][comp] = []
+                    isotherm[label][comp].append(conv_ener * gcmc_out['components'][comp][label])
+
+                for label in general_labels:
+                    isotherm_output[label][comp] = gcmc_out['components'][comp][label]
+
+        isotherm_output.update({
+            "isotherm": isotherm,
+        })
+
+    return Dict(dict=isotherm_output)
 
 
 # Deafault parameters
@@ -89,39 +168,42 @@ HTSPARAMETERS_DEFAULT = Dict(
         "raspa_widom_cycles": int(1e5),  # int, Number of widom cycles
         "raspa_gcmc_init_cycles": int(1e3),  # int, Number of GCMC initialization cycles
         "raspa_gcmc_prod_cycles": int(1e4),  # int, Number of GCMC production cycles
-        "lcd_max" : 15.0, # mandatory
-        "pld_scale" : 1.0, # mandatory
-        "pressure_list": [0.1e5,1.0e5],  # list, Pressure list for the isotherm (bar): if given it will skip  guess
-        "ideal_selectivity_threshold": 10.0, #mandatory if protocol is relative.
-        "ideal_selectivity_protocol": 'ignore', # ignore, loose, and tight!
+        "lcd_max": 15.0,  # mandatory
+        "pld_scale": 1.0,  # mandatory
+        "pressure_list": [0.1e5, 1.0e5],  # list, Pressure list for the isotherm (bar): if given it will skip  guess
+        "ideal_selectivity_threshold": 10.0,  #mandatory if protocol is relative.
+        "ideal_selectivity_protocol": 'ignore',  # ignore, loose, and tight!
     })
 
+
 class SmartHTSWorkChain(WorkChain):
-    """
-    The ZeoppRaspaWorkChain is designed to perform zeo++ and
-    RASPA calculations.
+    """SmartHTSWorkChain computes pore diameter, surface area, pore volume,
+    and block pockets for provided mixture composition and based on these
+    results decides to run Henry coefficient and possibly multi-components
+    GCMC calculations using RASPA.
     """
 
     @classmethod
     def define(cls, spec):
         super(SmartHTSWorkChain, cls).define(spec)
-        """
-        Define workflow specification.
-        This is the most important method of a Workchain, which defines the
-        inputs it takes, the logic of the execution and the outputs
-        that are generated in the process.
-        """
+
         # SmartHTSWorkChain inputs!
         spec.input("structure", valid_type=CifData, required=True, help="Input structure in cif format")
-        spec.input("parameters", valid_type=Dict, default=HTSPARAMETERS_DEFAULT, required=True, help='It provides the parameters which control the decision making behavior of workchain.')
-        spec.input("mixture", valid_type=Str, required=True, help='It correspnds to the name of yaml file which provides componenets information!')
+        spec.input("parameters",
+                   valid_type=Dict,
+                   default=HTSPARAMETERS_DEFAULT,
+                   required=True,
+                   help='It provides the parameters which control the decision making behavior of workchain.')
+        spec.input("mixture",
+                   valid_type=Str,
+                   required=True,
+                   help='It correspnds to the name of yaml file which provides componenets information!')
 
-
-        # Exposing the remaining inputs!
+        # Exposing the Zeopp and RASPA inputs!
         spec.expose_inputs(ZeoppCalculation, namespace='zeopp', include=['code', 'metadata'])
         spec.expose_inputs(RaspaBaseWorkChain, namespace='raspa_base', exclude=['raspa.structure', 'raspa.parameters'])
 
-        # Redefine after finishing.
+        # Workflow.
         spec.outline(
             cls.setup,
             cls.run_zeopp,
@@ -131,22 +213,17 @@ class SmartHTSWorkChain(WorkChain):
                 cls.inspect_widom_calc,
                 if_(cls.should_run_gcmc)(
                     cls.init_raspa_gcmc,
-                    while_(cls.should_run_another_gcmc)(
-                        cls.run_raspa_gcmc,
-                        cls.parse_raspa_gcmc,
-                    ),
-                )
+                    while_(cls.should_run_another_gcmc)(cls.run_raspa_gcmc,),
+                    cls.return_isotherm,
+                ),
             ),
-            cls.return_results,
         )
 
-        # to be returned
+        # Dynamic output ports.
         spec.outputs.dynamic = True
 
     def setup(self):
-        """
-        Initialize variables and setup screening protocol!
-        """
+        """Initialize parameters"""
         # Getting the components dict.
         if isinstance(self.inputs.mixture, Str):
             self.ctx.components = get_components_dict(self.inputs.mixture)
@@ -160,35 +237,36 @@ class SmartHTSWorkChain(WorkChain):
         self.ctx.temperature = int(round(self.ctx.parameters['temperature']))
 
     def run_zeopp(self):
-        """
-        It performs the zeopp pore diameter calculation.
-        """
+        """It performs the full zeopp calculation for all components."""
         # Required inputs
         zeopp_inputs = self.exposed_inputs(ZeoppCalculation, 'zeopp')
-        zeopp_inputs['structure'] = self.inputs.structure
-        zeopp_inputs['metadata']['label'] = 'ZeoppVolpoBlock'
-        zeopp_inputs['metadata']['call_link_label'] = 'run_zeopp'
-        zeopp_inputs['metadata']['description'] = 'Called by SmartHTSWorkChain'
-        zeopp_inputs['atomic_radii'] = get_atomic_radii(self.ctx.parameters)
+        zeopp_inputs.update({
+            'metadata': {
+                'label': "ZeoppVolpoBlock",
+                'call_link_label': 'run_zeopp',
+                'description': 'Called by SmartHTSWorkChain',
+            },
+            'structure': self.inputs.structure,
+            'atomic_radii': get_atomic_radii(self.ctx.parameters),
+        })
 
         for key, value in self.ctx.components.get_dict().items():
             comp = value['name']
             proberad = Float(value['proberad'])
-            # zeopp_inputs['parameters'] = get_zeopp_parameters(self.ctx.components, self.ctx.parameters, Str(comp))
-            zeopp_inputs['parameters'] = get_zeopp_parameters(self.ctx.components, self.ctx.parameters, proberad)
+            zeopp_inputs.update(
+                {'parameters': get_zeopp_parameters(self.ctx.components, self.ctx.parameters, proberad)})
             running = self.submit(ZeoppCalculation, **zeopp_inputs)
             zeopp_label = "zeopp_{}".format(comp)
             self.report("Running zeo++ block and volpo Calculation<{}>".format(running.id))
-            self.to_context(**{zeopp_label:running})
+            self.to_context(**{zeopp_label: running})
 
     def inspect_zeopp_calc(self):
-        """Checks if all zeopp calculations are finished ok."""
+        """Asserts whether all widom calculations are finished ok."""
         for key, value in self.ctx.components.get_dict().items():
-            zeopp_label = "zeopp_{}".format(value['name'])
-            assert self.ctx[zeopp_label].is_finished_ok
+            assert self.ctx["zeopp_{}".format(value['name'])].is_finished_ok
 
     def should_run_widom(self):
-        """Decided whether to run widom or not"""
+        """Decided whether to run Henry coefficient calculation or not!"""
         self.ctx.should_run_widom = []
         self.ctx.geom = {}
         lcd_lim = self.ctx.parameters["lcd_max"]
@@ -200,31 +278,41 @@ class SmartHTSWorkChain(WorkChain):
             pld_component = self.ctx.geom[comp]["Largest_free_sphere"]
             lcd_component = self.ctx.geom[comp]["Largest_included_sphere"]
             if (lcd_component <= lcd_lim) and (pld_component >= pld_lim) and (self.ctx.geom[comp]['is_porous']):
-                self.report("ALL pre-selection conditions are satisfied: Calculate Henry coefficients")
                 self.report("Found {} blocking spheres".format(self.ctx.geom[comp]['Number_of_blocking_spheres']))
                 if self.ctx.geom[comp]['Number_of_blocking_spheres'] > 0:
-                    self.out_many(self.exposed_outputs(self.ctx[zeopp_label], ZeoppCalculation))
+                    self.ctx.geom[comp + "_block_file"] = self.ctx[zeopp_label].outputs.block
                 self.ctx.should_run_widom.append(True)
             else:
-                self.report("All/Some of pre-selection criteria are NOT met: terminate!")
                 self.ctx.should_run_widom.append(False)
-
+        if all(self.ctx.should_run_widom):
+            self.report("ALL pre-selection conditions are satisfied: Calculate Henry coefficients")
+        else:
+            self.report("All/Some of pre-selection criteria are NOT met: terminate!")
         self.out("geometric_output", self.ctx.geom)
         return all(self.ctx.should_run_widom)
 
     def _get_widom_param(self):
         """Write Raspa input parameters from scratch, for a Widom calculation"""
-
         param = {
             "GeneralSettings": {
-                "SimulationType": "MonteCarlo",
-                "NumberOfInitializationCycles": 0,
-                "NumberOfCycles": self.ctx.parameters['raspa_widom_cycles'],
-                "PrintPropertiesEvery": self.ctx.parameters['raspa_widom_cycles'] / self.ctx.parameters['raspa_verbosity'],
-                "PrintEvery": int(1e10),
-                "RemoveAtomNumberCodeFromLabel": True,  # be careful!
-                "Forcefield": self.ctx.parameters['forcefield'],
-                "CutOff": self.ctx.parameters['ff_cutoff'],
+                "SimulationType":
+                    "MonteCarlo",
+                "NumberOfInitializationCycles":
+                    0,
+                "NumberOfCycles":
+                    self.ctx.parameters['raspa_widom_cycles'],
+                "PrintPropertiesEvery":
+                    self.ctx.parameters['raspa_widom_cycles'] / self.ctx.parameters['raspa_verbosity'],
+                "PrintEvery":
+                    int(1e10),
+                "RemoveAtomNumberCodeFromLabel":
+                    True,  # be careful!
+                "Forcefield":
+                    "{}_{}_{}".format(self.ctx.parameters['forcefield'], ["notc",
+                                                                          "tc"][self.ctx.parameters['ff_tailcorr']],
+                                      ["trunc", "shift"][self.ctx.parameters['ff_shift']]),
+                "CutOff":
+                    self.ctx.parameters['ff_cutoff'],
             },
             "System": {
                 "framework_1": {
@@ -242,49 +330,50 @@ class SmartHTSWorkChain(WorkChain):
         return param
 
     def run_raspa_widom(self):
-        """
-        It generates the ParameterData for RASPA and use the blocking spheres if there is any.
-        With current plugin we can have more than one component to be used for Widom insertion.
-        """
+        """Run parallel Widom calculation in RASPA."""
         self.ctx.raspa_inputs = self.exposed_inputs(RaspaBaseWorkChain, 'raspa_base')
         self.ctx.raspa_inputs['metadata']['label'] = "RaspaWidom"
         self.ctx.raspa_inputs['metadata']['description'] = "Called by SmartHTSWorkChain"
-        self.ctx.raspa_inputs['metadata']['call_link_label'] = "run_raspa_widom"
-
         self.ctx.raspa_inputs['raspa']['framework'] = {"framework_1": self.inputs.structure}
 
         for key, value in self.ctx.components.get_dict().items():
             comp = value['name']
             zeopp_label = "zeopp_{}".format(comp)
+            self.ctx.raspa_inputs['metadata']['call_link_label'] = "run_raspa_widom_" + comp
             self.ctx.raspa_param = self._get_widom_param()
             self.ctx.raspa_inputs["raspa"]["block_pocket"] = {}
-            self.ctx.raspa_param["System"]["framework_1"]["HeliumVoidFraction"] = self.ctx.geom[comp]["POAV_Volume_fraction"]
             self.ctx.raspa_param["Component"][comp] = {}
             self.ctx.raspa_param["Component"][comp]["MoleculeDefinition"] = value['forcefield']
             self.ctx.raspa_param["Component"][comp]["WidomProbability"] = 1.0
             if self.ctx.geom[comp]['Number_of_blocking_spheres'] > 0:
-                self.ctx.raspa_inputs["raspa"]["block_pocket"] = {comp + "_block_file": self.ctx[zeopp_label].outputs.block}
+                self.ctx.raspa_inputs["raspa"]["block_pocket"] = {
+                    comp + "_block_file": self.ctx[zeopp_label].outputs.block
+                }
                 self.ctx.raspa_param["Component"][comp]["BlockPocketsFileName"] = comp + "_block_file"
             if value['charged']:
-                self.ctx.raspa_param["GeneralSettings"].update({"UseChargesFromCIFFile":"yes", "ChargeMethod": "Ewald", "EwaldPrecision": 1e-6})
+                self.ctx.raspa_param["GeneralSettings"].update({
+                    "UseChargesFromCIFFile": "yes",
+                    "ChargeMethod": "Ewald",
+                    "EwaldPrecision": 1e-6
+                })
 
             self.ctx.raspa_inputs['raspa']['parameters'] = Dict(dict=self.ctx.raspa_param)
             running = self.submit(RaspaBaseWorkChain, **self.ctx.raspa_inputs)
             widom_label = "widom_{}".format(comp)
-            self.report("Running Raspa Widom @ {}K for the Henry coefficient".format(self.ctx.temperature))
-            self.to_context(**{widom_label:running})
+            self.report("Running Raspa Widom @ {}K for the Henry coefficient of <{}>".format(
+                self.ctx.temperature, comp))
+            self.to_context(**{widom_label: running})
 
     def inspect_widom_calc(self):
-        """
-        Checks if all zeopp calculations are finished ok.
-        """
+        """Asserts whether all widom calculations are finished ok."""
         for key, value in self.ctx.components.get_dict().items():
-            widom_label = "widom_{}".format(value['name'])
-            assert self.ctx[widom_label].is_finished_ok
+            assert self.ctx["widom_{}".format(value['name'])].is_finished_ok
 
     def should_run_gcmc(self):
-        """
-        Should be updated!
+        """Based on user-defined protocol, decides to run the GCMC calculation or not
+        ignore: it skips the check!
+        loose: it only checkes comp1 against comp2.
+        tight: it checkes comp1 against all other componenets.
         """
         self.ctx.should_run_gcmc = []
         if self.ctx.parameters['ideal_selectivity_protocol'] == 'ignore':
@@ -295,8 +384,10 @@ class SmartHTSWorkChain(WorkChain):
             widom_label_comp2 = "widom_{}".format(self.ctx.components.get_dict()['comp2']['name'])
             output1 = self.ctx[widom_label_comp1].outputs.output_parameters.get_dict()
             output2 = self.ctx[widom_label_comp2].outputs.output_parameters.get_dict()
-            self.ctx.kh_comp1 = output1["framework_1"]["components"][self.ctx.components.get_dict()['comp1']['name']]["henry_coefficient_average"]
-            self.ctx.kh_comp2 = output2["framework_1"]["components"][self.ctx.components.get_dict()['comp2']['name']]["henry_coefficient_average"]
+            self.ctx.kh_comp1 = output1["framework_1"]["components"][self.ctx.components.get_dict()['comp1']
+                                                                     ['name']]["henry_coefficient_average"]
+            self.ctx.kh_comp2 = output2["framework_1"]["components"][self.ctx.components.get_dict()['comp2']
+                                                                     ['name']]["henry_coefficient_average"]
             self.ctx.ideal_selectivity = self.ctx.kh_comp1 / self.ctx.kh_comp2
             self.ctx.ideal_selectivity_threshold = self.ctx.parameters["ideal_selectivity_threshold"]
             if self.ctx.ideal_selectivity >= self.ctx.ideal_selectivity_threshold:
@@ -309,51 +400,67 @@ class SmartHTSWorkChain(WorkChain):
         if self.ctx.parameters['ideal_selectivity_protocol'] == 'tight':
             widom_label_comp1 = "widom_{}".format(self.ctx.components.get_dict()['comp1']['name'])
             output1 = self.ctx[widom_label_comp1].outputs.output_parameters.get_dict()
-            self.ctx.kh_comp1 = output1["framework_1"]["components"][self.ctx.components.get_dict()['comp1']['name']]["henry_coefficient_average"]
+            self.ctx.kh_comp1 = output1["framework_1"]["components"][self.ctx.components.get_dict()['comp1']
+                                                                     ['name']]["henry_coefficient_average"]
             for key, value in self.ctx.components.get_dict().items():
                 comp = value['name']
                 widom_label = "widom_{}".format(comp)
                 output = self.ctx[widom_label].outputs.output_parameters.get_dict()
                 self.ctx.kh_comp = output["framework_1"]["components"][comp]["henry_coefficient_average"]
                 self.ctx.ideal_selectivity = self.ctx.kh_comp1 / self.ctx.kh_comp
-                if self.ctx.ideal_selectivity > self.ctx.ideal_selectivity_threshold:
+                if self.ctx.ideal_selectivity >= self.ctx.ideal_selectivity_threshold:
                     self.ctx.should_run_gcmc.append(True)
                 else:
                     self.ctx.should_run_gcmc.append(False)
 
         return all(self.ctx.should_run_gcmc)
 
-    def init_raspa_gcmc(self):
-        """Initialize RASPA gcmc"""
-        # resetting the component section for having multi-comp simulation.
-        self.ctx.raspa_param["Component"] = {}
-        self.ctx.raspa_param["Component"] = {item:{} for index, item in enumerate(list(self.ctx.components.get_dict()))}
+    def _update_param_input_for_gcmc(self):
+        """Update Raspa input parameter, from Widom to GCMC"""
 
-        # Initializate counter and set restart to None
-        self.ctx.current_p_index = 0
-        self.ctx.restart_raspa_calc = None
-
-        self.ctx.pressures = choose_pressure_points(self.ctx.parameters)
-
-        self.report("<{}> points are chosen for GCMC calculation".format(len(self.ctx.pressures)))
-
-        # Iterating over components and update the input.
+        param = self.ctx.raspa_param
+        inp = self.ctx.raspa_inputs
+        param["GeneralSettings"].update({
+            "NumberOfInitializationCycles": self.ctx.parameters['raspa_gcmc_init_cycles'],
+            "NumberOfCycles": self.ctx.parameters['raspa_gcmc_prod_cycles'],
+            "PrintPropertiesEvery": int(1e6),
+            "PrintEvery": self.ctx.parameters['raspa_gcmc_prod_cycles'] / self.ctx.parameters['raspa_verbosity']
+        })
+        param["Component"] = {}
+        param["Component"] = {item: {} for index, item in enumerate(list(self.ctx.components.get_dict()))}
+        inp["raspa"]["block_pocket"] = {}
         for key, value in self.ctx.components.get_dict().items():
             comp = value['name']
-            mol_frac = value['molfraction']
-            singlebead = value['singlebead']
-            self.ctx.raspa_param["Component"][comp] = self.ctx.raspa_param["Component"].pop(key)
-            self.ctx.raspa_param["Component"][comp]["MolFraction"] = float(mol_frac)
-            self.ctx.raspa_param["Component"][comp]["TranslationProbability"] = 0.5
-            # Only adds RotationProbability move if it is not singlebead model.
-            if not singlebead:
-                self.ctx.raspa_param["Component"][comp]["RotationProbability"] = 0.5
-            self.ctx.raspa_param["Component"][comp]["ReinsertionProbability"] = 0.5
-            self.ctx.raspa_param["Component"][comp]["SwapProbability"] = 1.0
-            self.ctx.raspa_param["Component"][comp]["IdentityChangeProbability"] = 1.0
-            self.ctx.raspa_param["Component"][comp]["NumberOfIdentityChanges"] = len(list(self.ctx.components.get_dict()))
-            self.ctx.raspa_param["Component"][comp]["IdentityChangesList"] = [i for i in range(len(list(self.ctx.components.get_dict())))]
-        return
+            zeopp_label = "zeopp_{}".format(comp)
+            bp_label = comp + "_block_file"
+            param["Component"][comp] = param["Component"].pop(key)
+            param["Component"][comp].update({
+                "MolFraction": value['molfraction'],
+                "TranslationProbability": 1.0,
+                "ReinsertionProbability": 1.0,
+                "SwapProbability": 2.0,
+                "IdentityChangeProbability": 2.0,
+                "NumberOfIdentityChanges": len(list(self.ctx.components.get_dict())),
+                "IdentityChangesList": [i for i in range(len(list(self.ctx.components.get_dict())))]
+            })
+            if not value['singlebead']:
+                param["Component"][comp].update({"RotationProbability": 1.0})
+            if self.ctx.geom[comp]['Number_of_blocking_spheres'] > 0:
+                param["Component"][comp]["BlockPocketsFileName"] = {}
+                param["Component"][comp]["BlockPocketsFileName"]["framework_1"] = bp_label
+                inp["raspa"]["block_pocket"][bp_label] = self.ctx[zeopp_label].outputs.block
+
+        return param, inp
+
+    def init_raspa_gcmc(self):
+        """Initialize RASPA gcmc"""
+
+        self.ctx.current_p_index = 0
+        self.ctx.pressures = choose_pressure_points(self.ctx.parameters)
+        self.report("Now evaluating the isotherm @ {}K for {} pressure points".format(
+            self.ctx.temperature, len(self.ctx.pressures)))
+
+        self.ctx.raspa_param, self.ctx.raspa_inputs = self._update_param_input_for_gcmc()
 
     def should_run_another_gcmc(self):
         """
@@ -370,184 +477,42 @@ class SmartHTSWorkChain(WorkChain):
         self.ctx.raspa_inputs['metadata']['description'] = 'Called by SmartHTSWorkChain'
         self.ctx.raspa_inputs['metadata']['call_link_label'] = "run_raspa_gcmc_{}".format(self.ctx.current_p_index + 1)
 
-        self.ctx.raspa_param["System"]["framework_1"]["ExternalPressure"] = self.ctx.pressures[self.ctx.current_p_index]
+        self.ctx.raspa_param["System"]["framework_1"]["ExternalPressure"] = self.ctx.pressures[
+            self.ctx.current_p_index] * 1e5
 
-        # Create the input dictionary
-        self.ctx.raspa_inputs["raspa"]["block_pocket"] ={}
-
-        for key, value in self.ctx.components.get_dict().items():
-            comp = value['name']
-            zeopp_label = "zeopp_{}".format(comp)
-            bp_label = comp + "_block_file"
-
-            if self.ctx.geom[comp]['Number_of_blocking_spheres'] > 0:
-                self.ctx.raspa_param["Component"][comp]["BlockPocketsFileName"] = {}
-                self.ctx.raspa_param["Component"][comp]["BlockPocketsFileName"]["framework_1"] = bp_label
-                self.ctx.raspa_inputs["raspa"]["block_pocket"][bp_label] = self.ctx[zeopp_label].outputs.block
-
-        if self.ctx.restart_raspa_calc is not None:
-            self.ctx.raspa_inputs["raspa"]['retrieved_parent_folder'] = self.ctx.restart_raspa_calc
+        if self.ctx.current_p_index > 0:
+            self.ctx.raspa_inputs["raspa"]['retrieved_parent_folder'] = self.ctx.raspa_gcmc[self.ctx.current_p_index -
+                                                                                            1].outputs.retrieved
 
         self.ctx.raspa_inputs['raspa']['parameters'] = Dict(dict=self.ctx.raspa_param)
 
         # Create the calculation process and launch it
         running = self.submit(RaspaBaseWorkChain, **self.ctx.raspa_inputs)
-        self.report("pk: <{}> | Submitted RaspaBaseWorkchain at p(bar)={:.3f} <{} of {}>".format(running.pk, self.ctx.pressures[self.ctx.current_p_index]/1e5, self.ctx.current_p_index+1, len(self.ctx.pressures)))
-        # self.ctx.nruns += 1
-        return ToContext(raspa_gcmc=running)
-
-    def parse_raspa_gcmc(self):
-        """
-        Extract the pressure and loading average of the last completed and converged
-        RASPA calculation.
-        """
-        pressure = self.ctx.raspa_param["System"]["framework_1"]["ExternalPressure"]/1e5
-        output_gcmc = self.ctx.raspa_gcmc.outputs.output_parameters.get_dict()
-        self.ctx.restart_raspa_calc = self.ctx.raspa_gcmc.outputs['retrieved']
-        # Creating the loading empty dictionary only at first run.
-        if self.ctx.current_p_index == 0:
-            self.ctx.loading = {}
-            self.ctx.enthalpy = {}
-            for key, value in self.ctx.components.get_dict().items():
-                comp = value['name']
-                self.ctx.loading[comp] = []
-                self.ctx.enthalpy[comp] = []
-
-        # Iterating over components and append the loadings and
-        # error bars to the dictionary.
-        conv1 =  1.0 / 120.273
-        for key, value in self.ctx.components.get_dict().items():
-            comp = value['name']
-            conv2 = output_gcmc["framework_1"]["components"][comp]["conversion_factor_molec_uc_to_mol_kg"]
-            loading_average_comp = conv2 * output_gcmc["framework_1"]["components"][comp]["loading_absolute_average"]
-            loading_dev_comp = conv2 * output_gcmc["framework_1"]["components"][comp]["loading_absolute_dev"]
-            enthalpy_average_comp = conv1 * output_gcmc["framework_1"]["components"][comp]["enthalpy_of_adsorption_average"]
-            enthalpy_dev_comp = conv1 * output_gcmc["framework_1"]["components"][comp]["enthalpy_of_adsorption_dev"]
-
-            self.ctx.loading[comp].append([pressure, loading_average_comp, loading_dev_comp])
-            self.ctx.enthalpy[comp].append([pressure, enthalpy_average_comp, enthalpy_dev_comp])
-
-        # Simulation is converged that we are parsing. Increase the pressure index.
+        self.report("Running Raspa GCMC @ {}K/{:.3f}bar (pressure {} of {})".format(
+            self.ctx.temperature, self.ctx.pressures[self.ctx.current_p_index], self.ctx.current_p_index + 1,
+            len(self.ctx.pressures)))
         self.ctx.current_p_index += 1
-        return
+        return ToContext(raspa_gcmc=append_(running))
 
-    def return_results(self):
-        """
-        Attach the results to the output.
-        """
-        # TODO: Benefit from calcfuntion!
-        # Create empty results dictionary.
-        result_dict = {}
+    def return_isotherm(self):
+        """If is_porous and is_kh_enough create the isotherm_output Dict and report the pks"""
 
-        # Zeopp section
-        try:
-            # Output of Di and Df
+        all_raspa_out_dict = {}
 
-            # Creating the needed keys within the result dictionary for zeo++ results.
-            result_dict["POAV_Volume_fraction"] = {}
-            result_dict["PONAV_Volume_fraction"] = {}
-            result_dict["POAV"] = {}
-            result_dict["GASA"] = {}
-            result_dict["VASA"] = {}
-            result_dict["NGASA"] = {}
-            result_dict["NVASA"] = {}
-            result_dict["Channel_surface_area"] = {}
-            result_dict["Pocket_surface_area"] = {}
-            result_dict["Density_unit"] = "g/cm^3"
-            result_dict["POAV_unit"] = "cm^3/g"
-            result_dict["GASA_unit"] = "m^2/g"
-            result_dict["VASA_unit"] = "m^2/cm^3"
-            result_dict["NGASA_unit"] = "m^2/g"
-            result_dict["NVASA_unit"] = "ASA_m^2/cm^3"
-            result_dict["Channel_surface_area_unit"] = "A^2"
-            result_dict["Pocket_surface_area_unit"] = "A^2"
-            result_dict["number_blocking_spheres"] = {}
-            # Iterating over components and extract results.
-            for key, value in self.ctx.components.get_dict().items():
-                comp = value['name']
-                zeopp_label = "zeopp_{}".format(comp)
-                output_zeo = self.ctx[zeopp_label].outputs.output_parameters.get_dict()
+        for key, value in self.ctx.components.get_dict().items():
+            widom_label = "widom_{}".format(value['name'])
+            all_raspa_out_dict[widom_label] = self.ctx[widom_label].outputs.output_parameters
 
-                # result_dict["Largest_included_sphere"] = self.ctx[zeopp_label].outputs.output_parameters.get_dict()["Largest_included_sphere"]
-                # result_dict["Largest_free_sphere"] = self.ctx[zeopp_label].outputs.output_parameters.get_dict()["Largest_free_sphere"]
+        for calc in self.ctx.raspa_gcmc:
+            all_raspa_out_dict[calc.label] = calc.outputs.output_parameters
 
-                result_dict["POAV_Volume_fraction"][comp] = output_zeo["POAV_Volume_fraction"]
-                result_dict["PONAV_Volume_fraction"][comp] = output_zeo["PONAV_Volume_fraction"]
-                result_dict["POAV"][comp] = output_zeo["POAV_cm^3/g"]
-                result_dict["GASA"][comp] = output_zeo["ASA_m^2/g"]
-                # result_dict["VASA"][comp] = output_zeo["ASA_m^2/cm^3"]
-                result_dict["NGASA"][comp] = output_zeo["NASA_m^2/g"]
-                result_dict["NVASA"][comp] = output_zeo["NASA_m^2/cm^3"]
-                result_dict["Channel_surface_area"][comp] = output_zeo["Channel_surface_area_A^2"]
-                result_dict["Pocket_surface_area"][comp] = output_zeo["Pocket_surface_area_A^2"]
-                # result_dict["number_blocking_spheres"][comp] = self.ctx.number_blocking_spheres[comp]
-                result_dict["Density"] = output_zeo["Density"]
-        except AttributeError:
-            pass
+        self.out(
+            "isotherm_output",
+            get_isotherm_output(Bool(self.ctx.should_run_gcmc), self.ctx.parameters, self.ctx.components,
+                                self.ctx.pressures, **all_raspa_out_dict))
 
-        # RASPA widom Section
-        try:
-            # Getting the output parameters of widom calculation.
-            # Creating the needed keys within the result dictionary for RASPA Widom results.
-            result_dict["henry_coefficient_average"] = {}
-            result_dict["henry_coefficient_dev"] = {}
-            result_dict["adsorption_energy_average"] = {}
-            result_dict["adsorption_energy_dev"] = {}
-            result_dict["temperature"] = self.ctx.raspa_param["System"]["framework_1"]["ExternalTemperature"]
-            result_dict["temperature_unit"] = "K"
+        self.report("Isotherm @ {}K computed: isotherm Dict<{}>".format(self.ctx.temperature,
+                                                                        self.outputs['isotherm_output'].pk))
 
-            # Iterating over components and extract results.
-            for key, value in self.ctx.components.get_dict().items():
-                comp = value['name']
-                widom_label = "widom_{}".format(comp)
-                output_widom = self.ctx[widom_label].outputs.output_parameters.get_dict()
 
-                compout = output_widom["framework_1"]["components"][comp]
-                result_dict["henry_coefficient_unit"] = compout["henry_coefficient_unit"]
-                result_dict["adsorption_energy_unit"] = compout["adsorption_energy_widom_unit"]
-                result_dict["henry_coefficient_average"][comp] = compout["henry_coefficient_average"]
-                result_dict["henry_coefficient_dev"][comp] = compout["henry_coefficient_dev"]
-                result_dict["adsorption_energy_average"][comp] = compout["adsorption_energy_widom_average"]
-                result_dict["adsorption_energy_dev"][comp] = compout["adsorption_energy_widom_dev"]
-        except AttributeError:
-            pass
-
-        # RASPA Section
-        try:
-            # Getting the output parameters of converged GCMC calculation.
-            output_gcmc = self.ctx.raspa_gcmc.outputs.output_parameters.get_dict()
-            # Creating the needed keys within the result dictionary for RASPA Widom results.
-            result_dict["conversion_factor_molec_uc_to_cm3stp_cm3"] = {}
-            result_dict["conversion_factor_molec_uc_to_gr_gr"] = {}
-            result_dict["conversion_factor_molec_uc_to_mol_kg"] = {}
-            result_dict["isotherm_loading_header"] = ["Pressure(bar)", "Loading_average(mol/kg)", "Loading_deviation(mol/kg)"]
-            result_dict["isotherm_loading"] = {}
-            result_dict["mol_fraction"] = {}
-            result_dict["isotherm_enthalpy"] = {}
-            # Iterating over components and extract results.
-            for key, value in self.ctx.components.get_dict().items():
-                comp = value['name']
-                #mol_frac = value['molfraction']
-                result_dict["conversion_factor_molec_uc_to_cm3stp_cm3"][comp] = output_gcmc["framework_1"]["components"][comp]["conversion_factor_molec_uc_to_cm3stp_cm3"]
-                result_dict["conversion_factor_molec_uc_to_gr_gr"][comp] = output_gcmc["framework_1"]["components"][comp]["conversion_factor_molec_uc_to_gr_gr"]
-                result_dict["conversion_factor_molec_uc_to_mol_kg"][comp] = output_gcmc["framework_1"]["components"][comp]["conversion_factor_molec_uc_to_mol_kg"]
-                result_dict["mol_fraction"][comp] = output_gcmc["framework_1"]["components"][comp]["mol_fraction"]
-                result_dict["isotherm_loading"][comp] = self.ctx.loading[comp]
-                result_dict["isotherm_enthalpy"][comp] = self.ctx.enthalpy[comp]
-        except AttributeError:
-            pass
-
-        # Blocking Spheres Section
-        # for key, value in self.ctx.raspa_comp.items():
-        #     comp = value['name']
-        #     zeopp_label = "zeopp_{}".format(comp)
-        #     bp_label = comp + "_block_file"
-        #     # Only keeping non-empty block pocket files.
-        #     if self.ctx.number_blocking_spheres[comp] > 0:
-        #         self.out("blocking_spheres_{}".format(comp), self.ctx[zeopp_label].outputs.block)
-
-        # Finalizing the results and report!
-        self.out("results", Dict(dict=result_dict))
-        self.report("Workchain completed successfully! | Result Dict is <{}>".format(self.outputs["results"].pk))
-        return
 # EOF
