@@ -18,6 +18,22 @@ ch4:
   name: methane
   forcefield: TraPPE
   molsatdens: 666
-  proberad: 666
+  proberad: 1.730
+  singlebead: True
+  charged: False
+
+xenon:
+  name: Xe
+  forcefield: BOATO
+  molsatdens: 666
+  proberad: 1.985
+  singlebead: True
+  charged: False
+
+krypton:
+  name: Kr
+  forcefield: BOATO
+  molsatdens: 666
+  proberad: 1.830
   singlebead: True
   charged: False

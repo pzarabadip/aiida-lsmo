@@ -22,7 +22,7 @@
             "lsmo.isotherm_calc_pe = aiida_lsmo.workchains:IsothermCalcPEWorkChain",
             "lsmo.zeoppmultistageddec = aiida_lsmo.workchains:ZeoppMultistageDdecWorkChain",
             "lsmo.multistageddec = aiida_lsmo.workchains:MultistageDdecWorkChain",
-            "lsmo.smarthts = aiida_lsmo.workchains:SmartHTSWorkChain"
+            "lsmo.isotherm_multi_comp = aiida_lsmo.workchains:IsothermMultiCompWorkChain"
         ]
     },
     "data_files": [

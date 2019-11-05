@@ -21,38 +21,33 @@ ZeoppParameters = DataFactory("zeopp.parameters")
 
 ZeoppCalculation = CalculationFactory("zeopp.network")
 
-
 @calcfunction
-def get_components_dict(mixture_name):
-    """Get a Dict from the provided pre-defined mixture"""
+def get_components_dict(mixture, isotparam):
+    """Construct components dict"""
     import ruamel.yaml as yaml
-    thisdir = os.path.dirname(os.path.abspath(__file__))
-    yamlfile = os.path.join(thisdir, "isotherm_data", mixture_name.value + ".yaml")
+    mixture_dict = {}
+    thisdir = '/storage/brno9-ceitec/home/pezhman/projects/git_repos/aiida-lsmo/aiida_lsmo/workchains/isotherm_data'
+    yamlfile = os.path.join(thisdir, "isotherm_molecules.yaml")
     with open(yamlfile, 'r') as stream:
-        mixture_dict = yaml.safe_load(stream)
+        yaml_dict = yaml.safe_load(stream)
+    for key, value in mixture.get_dict().items():
+        mixture_dict[key] = yaml_dict[value['name']]
+        mixture_dict[key]['molfraction'] = value['molfraction']
+        probe_rad = mixture_dict[key]['proberad']
+        mixture_dict[key]['zeopp'] = {
+            'ha': 'DEF',
+            'res': True,
+            'sa': [probe_rad, probe_rad, isotparam['zeopp_sa_samples']],
+            'volpo': [probe_rad, probe_rad, isotparam['zeopp_volpo_samples']],
+            'block': [probe_rad, isotparam['zeopp_block_samples']],
+        }
     return Dict(dict=mixture_dict)
 
 
 @calcfunction
-def get_atomic_radii(htsparam):
-    """Get {forcefield}.rad as SinglefileData form workchain/isotherm_data"""
-    thisdir = os.path.dirname(os.path.abspath(__file__))
-    fullfilename = htsparam['forcefield'] + ".rad"
-    return SinglefileData(file=os.path.join(thisdir, "isotherm_data", fullfilename))
-
-
-@calcfunction
-def get_zeopp_parameters(components, htsparams, probrad):
-    """Get the ZeoppParameters from the inputs of the workchain"""
-    probe_rad = probrad.value
-    param_dict = {
-        'ha': 'DEF',
-        'res': True,
-        'sa': [probe_rad, probe_rad, htsparams['zeopp_sa_samples']],
-        'volpo': [probe_rad, probe_rad, htsparams['zeopp_volpo_samples']],
-        'block': [probe_rad, htsparams['zeopp_block_samples']],
-    }
-    return ZeoppParameters(dict=param_dict)
+def get_zeopp_parameters(components, comp):
+    """Get the ZeoppParameters from the components Dict!"""
+    return ZeoppParameters(dict=components[comp.value]['zeopp'])
 
 
 @calcfunction
@@ -62,17 +57,19 @@ def get_geometric_output(zeopp_out):
     geometric_output.update({'is_porous': geometric_output["POAV_A^3"] > 0.000})
     return Dict(dict=geometric_output)
 
-
 @calcfunction
-def choose_pressure_points(inp_param):
-    """If 'presure_list' is not provide, model the isotherm as single-site langmuir and return the most important
-    pressure points to evaluate for an isotherm, in a List.
-    """
-    if inp_param["pressure_list"]:
-        pressure_points = inp_param["pressure_list"]
-    else:
-        raise Exception('Pressue list is not provided!')
-    return List(list=pressure_points)
+def get_ff_params(isotparam, components):
+    ff_param = {
+        'ff_framework': isotparam['forcefield'],
+        'ff_molecules': {},
+        'shifted': isotparam['ff_shift'],
+        'tailcorrections': isotparam['ff_tailcorr'],
+        'mixing_rule': 'Lorentz-Berthelot'
+    }
+    for key, value in components.get_dict().items():
+        ff = value['forcefield']
+        ff_param['ff_molecules'][value['name']] = ff
+    return Dict(dict=ff_param)
 
 
 @calcfunction
@@ -153,31 +150,30 @@ def get_isotherm_output(should_run_gcmc, parameters, components, pressures, **al
 
 
 # Deafault parameters
-HTSPARAMETERS_DEFAULT = Dict(
+ISOTHERMPARAMETERS_DEFAULT = Dict(
     dict={  #TODO: create IsothermParameters instead of Dict # pylint: disable=fixme
         "forcefield": "UFF",  # str, Forcefield of the structure
         "ff_tailcorr": True,  # bool, Apply tail corrections
         "ff_shift": False,  # bool, Shift or truncate at cutoff
         "ff_cutoff": 12.0,  # float, CutOff truncation for the VdW interactions (Angstrom)
         "temperature": 300,  # float, Temperature of the simulation
-        "temperature_list": None,  # list, to be used by IsothermMultiTempWorkChain
         "zeopp_volpo_samples": int(1e5),  # int, Number of samples for VOLPO calculation (per UC volume)
+        "zeopp_sa_samples": int(1e5),  # int, Number of samples for VOLPO calculation (per UC volume)
         "zeopp_block_samples": int(100),  # int, Number of samples for BLOCK calculation (per A^3)
-        "raspa_minKh": 1e-10,  # float, If Henry coefiicient < raspa_minKh do not run the isotherm (mol/kg/Pa)
         "raspa_verbosity": 10,  # int, Print stats every: number of cycles / raspa_verbosity
         "raspa_widom_cycles": int(1e5),  # int, Number of widom cycles
         "raspa_gcmc_init_cycles": int(1e3),  # int, Number of GCMC initialization cycles
         "raspa_gcmc_prod_cycles": int(1e4),  # int, Number of GCMC production cycles
-        "lcd_max": 15.0,  # mandatory
-        "pld_scale": 1.0,  # mandatory
+        "lcd_max": 15.0,  # Maximum allowed LCD.
+        "pld_scale": 1.0,  # Scaling factor for minimum allowed PLD.
         "pressure_list": [0.1e5, 1.0e5],  # list, Pressure list for the isotherm (bar): if given it will skip  guess
-        "ideal_selectivity_threshold": 10.0,  #mandatory if protocol is relative.
-        "ideal_selectivity_protocol": 'ignore',  # ignore, loose, and tight!
+        "ideal_selectivity_threshold": 1.0,  #mandatory if protocol is relative.
+        "run_gcmc_protocol": 'always',  # always, loose, and tight!
     })
 
 
-class SmartHTSWorkChain(WorkChain):
-    """SmartHTSWorkChain computes pore diameter, surface area, pore volume,
+class IsothermMultiCompWorkChain(WorkChain):
+    """IsothermMultiCompWorkChain computes pore diameter, surface area, pore volume,
     and block pockets for provided mixture composition and based on these
     results decides to run Henry coefficient and possibly multi-components
     GCMC calculations using RASPA.
@@ -185,22 +181,22 @@ class SmartHTSWorkChain(WorkChain):
 
     @classmethod
     def define(cls, spec):
-        super(SmartHTSWorkChain, cls).define(spec)
+        super(IsothermMultiCompWorkChain, cls).define(spec)
 
-        # SmartHTSWorkChain inputs!
+        # IsothermMultiCompWorkChain inputs!
         spec.input("structure", valid_type=CifData, required=True, help="Input structure in cif format")
         spec.input("parameters",
                    valid_type=Dict,
-                   default=HTSPARAMETERS_DEFAULT,
+                   default=ISOTHERMPARAMETERS_DEFAULT,
                    required=True,
                    help='It provides the parameters which control the decision making behavior of workchain.')
         spec.input("mixture",
-                   valid_type=Str,
+                   valid_type=Dict,
                    required=True,
-                   help='It correspnds to the name of yaml file which provides componenets information!')
+                   help='A dictionary of components with their corresponding mol fractions in the mixture.')
 
         # Exposing the Zeopp and RASPA inputs!
-        spec.expose_inputs(ZeoppCalculation, namespace='zeopp', include=['code', 'metadata'])
+        spec.expose_inputs(ZeoppCalculation, namespace='zeopp', include=['atomic_radii','code', 'metadata'])
         spec.expose_inputs(RaspaBaseWorkChain, namespace='raspa_base', exclude=['raspa.structure', 'raspa.parameters'])
 
         # Workflow.
@@ -224,14 +220,10 @@ class SmartHTSWorkChain(WorkChain):
 
     def setup(self):
         """Initialize parameters"""
-        # Getting the components dict.
-        if isinstance(self.inputs.mixture, Str):
-            self.ctx.components = get_components_dict(self.inputs.mixture)
-        else:
-            raise Exception('Mixture is not provided properly!')
-
         # Getting and updating the HTS parameters!
-        self.ctx.parameters = aiida_dict_merge(HTSPARAMETERS_DEFAULT, self.inputs.parameters)
+        self.ctx.parameters = aiida_dict_merge(ISOTHERMPARAMETERS_DEFAULT, self.inputs.parameters)
+        # Getting the components dict.
+        self.ctx.components = get_components_dict(self.inputs.mixture, self.ctx.parameters)
 
         # Get integer temperature in context for easy reports
         self.ctx.temperature = int(round(self.ctx.parameters['temperature']))
@@ -242,19 +234,19 @@ class SmartHTSWorkChain(WorkChain):
         zeopp_inputs = self.exposed_inputs(ZeoppCalculation, 'zeopp')
         zeopp_inputs.update({
             'metadata': {
-                'label': "ZeoppVolpoBlock",
+                'label': "ZeoppResSaVolpoBlock",
                 'call_link_label': 'run_zeopp',
-                'description': 'Called by SmartHTSWorkChain',
+                'description': 'Called by IsothermMultiCompWorkChain',
             },
             'structure': self.inputs.structure,
-            'atomic_radii': get_atomic_radii(self.ctx.parameters),
         })
 
         for key, value in self.ctx.components.get_dict().items():
             comp = value['name']
-            proberad = Float(value['proberad'])
+            zeopp = value['zeopp']
             zeopp_inputs.update(
-                {'parameters': get_zeopp_parameters(self.ctx.components, self.ctx.parameters, proberad)})
+                {'parameters':get_zeopp_parameters(self.ctx.components, Str(key))}
+            )
             running = self.submit(ZeoppCalculation, **zeopp_inputs)
             zeopp_label = "zeopp_{}".format(comp)
             self.report("Running zeo++ block and volpo Calculation<{}>".format(running.id))
@@ -277,7 +269,8 @@ class SmartHTSWorkChain(WorkChain):
             self.ctx.geom[comp] = get_geometric_output(self.ctx[zeopp_label].outputs.output_parameters)
             pld_component = self.ctx.geom[comp]["Largest_free_sphere"]
             lcd_component = self.ctx.geom[comp]["Largest_included_sphere"]
-            if (lcd_component <= lcd_lim) and (pld_component >= pld_lim) and (self.ctx.geom[comp]['is_porous']):
+            poav_component = self.ctx.geom[comp]["POAV_A^3"]
+            if (lcd_component <= lcd_lim) and (pld_component >= pld_lim) and (poav_component > 0.0):
                 self.report("Found {} blocking spheres".format(self.ctx.geom[comp]['Number_of_blocking_spheres']))
                 if self.ctx.geom[comp]['Number_of_blocking_spheres'] > 0:
                     self.ctx.geom[comp + "_block_file"] = self.ctx[zeopp_label].outputs.block
@@ -333,8 +326,9 @@ class SmartHTSWorkChain(WorkChain):
         """Run parallel Widom calculation in RASPA."""
         self.ctx.raspa_inputs = self.exposed_inputs(RaspaBaseWorkChain, 'raspa_base')
         self.ctx.raspa_inputs['metadata']['label'] = "RaspaWidom"
-        self.ctx.raspa_inputs['metadata']['description'] = "Called by SmartHTSWorkChain"
+        self.ctx.raspa_inputs['metadata']['description'] = "Called by IsothermMultiCompWorkChain"
         self.ctx.raspa_inputs['raspa']['framework'] = {"framework_1": self.inputs.structure}
+        self.ctx.raspa_inputs['raspa']['ff_parameters'] = get_ff_params(self.ctx.parameters, self.ctx.components)
 
         for key, value in self.ctx.components.get_dict().items():
             comp = value['name']
@@ -371,15 +365,15 @@ class SmartHTSWorkChain(WorkChain):
 
     def should_run_gcmc(self):
         """Based on user-defined protocol, decides to run the GCMC calculation or not
-        ignore: it skips the check!
+        always: it skips the check!
         loose: it only checkes comp1 against comp2.
         tight: it checkes comp1 against all other componenets.
         """
         self.ctx.should_run_gcmc = []
-        if self.ctx.parameters['ideal_selectivity_protocol'] == 'ignore':
+        if self.ctx.parameters['run_gcmc_protocol'] == 'always':
             self.ctx.should_run_gcmc.append(True)
 
-        if self.ctx.parameters['ideal_selectivity_protocol'] == 'loose':
+        if self.ctx.parameters['run_gcmc_protocol'] == 'loose':
             widom_label_comp1 = "widom_{}".format(self.ctx.components.get_dict()['comp1']['name'])
             widom_label_comp2 = "widom_{}".format(self.ctx.components.get_dict()['comp2']['name'])
             output1 = self.ctx[widom_label_comp1].outputs.output_parameters.get_dict()
@@ -397,7 +391,7 @@ class SmartHTSWorkChain(WorkChain):
                 self.report("Ideal selectivity is less than threshold: DO NOT compute the GCMC")
                 self.ctx.should_run_gcmc.append(False)
 
-        if self.ctx.parameters['ideal_selectivity_protocol'] == 'tight':
+        if self.ctx.parameters['run_gcmc_protocol'] == 'tight':
             widom_label_comp1 = "widom_{}".format(self.ctx.components.get_dict()['comp1']['name'])
             output1 = self.ctx[widom_label_comp1].outputs.output_parameters.get_dict()
             self.ctx.kh_comp1 = output1["framework_1"]["components"][self.ctx.components.get_dict()['comp1']
@@ -445,6 +439,12 @@ class SmartHTSWorkChain(WorkChain):
             })
             if not value['singlebead']:
                 param["Component"][comp].update({"RotationProbability": 1.0})
+            if value['charged']:
+                param["GeneralSettings"].update({
+                    "UseChargesFromCIFFile": "yes",
+                    "ChargeMethod": "Ewald",
+                    "EwaldPrecision": 1e-6
+                })
             if self.ctx.geom[comp]['Number_of_blocking_spheres'] > 0:
                 param["Component"][comp]["BlockPocketsFileName"] = {}
                 param["Component"][comp]["BlockPocketsFileName"]["framework_1"] = bp_label
@@ -456,7 +456,7 @@ class SmartHTSWorkChain(WorkChain):
         """Initialize RASPA gcmc"""
 
         self.ctx.current_p_index = 0
-        self.ctx.pressures = choose_pressure_points(self.ctx.parameters)
+        self.ctx.pressures = self.ctx.parameters["pressure_list"]
         self.report("Now evaluating the isotherm @ {}K for {} pressure points".format(
             self.ctx.temperature, len(self.ctx.pressures)))
 
@@ -474,7 +474,7 @@ class SmartHTSWorkChain(WorkChain):
         It submits Raspa calculation to RaspaBaseWorkchain.
         """
         self.ctx.raspa_inputs['metadata']['label'] = "RaspaGCMC_{}".format(self.ctx.current_p_index + 1)
-        self.ctx.raspa_inputs['metadata']['description'] = 'Called by SmartHTSWorkChain'
+        self.ctx.raspa_inputs['metadata']['description'] = 'Called by IsothermMultiCompWorkChain'
         self.ctx.raspa_inputs['metadata']['call_link_label'] = "run_raspa_gcmc_{}".format(self.ctx.current_p_index + 1)
 
         self.ctx.raspa_param["System"]["framework_1"]["ExternalPressure"] = self.ctx.pressures[
@@ -483,7 +483,6 @@ class SmartHTSWorkChain(WorkChain):
         if self.ctx.current_p_index > 0:
             self.ctx.raspa_inputs["raspa"]['retrieved_parent_folder'] = self.ctx.raspa_gcmc[self.ctx.current_p_index -
                                                                                             1].outputs.retrieved
-
         self.ctx.raspa_inputs['raspa']['parameters'] = Dict(dict=self.ctx.raspa_param)
 
         # Create the calculation process and launch it
@@ -509,10 +508,7 @@ class SmartHTSWorkChain(WorkChain):
         self.out(
             "isotherm_output",
             get_isotherm_output(Bool(self.ctx.should_run_gcmc), self.ctx.parameters, self.ctx.components,
-                                self.ctx.pressures, **all_raspa_out_dict))
-
+                                List(list=self.ctx.pressures), **all_raspa_out_dict))
         self.report("Isotherm @ {}K computed: isotherm Dict<{}>".format(self.ctx.temperature,
                                                                         self.outputs['isotherm_output'].pk))
-
-
 # EOF
