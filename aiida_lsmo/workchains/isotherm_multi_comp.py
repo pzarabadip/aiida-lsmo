@@ -3,23 +3,23 @@ Smart High_Throughput Screening WorkChain
 """
 from __future__ import absolute_import
 import os
-import six
+from six.moves import range
 
 # AiiDA modules
 from aiida.plugins import CalculationFactory, DataFactory, WorkflowFactory
-from aiida.orm import Bool, Dict, Float, Int, List, Str, SinglefileData
+from aiida.orm import Bool, Dict, List, Str
 from aiida.engine import calcfunction
 from aiida.engine import ToContext, WorkChain, append_, if_, while_
 from aiida_lsmo.utils import aiida_dict_merge, check_resize_unit_cell
-from six.moves import range
 
-RaspaBaseWorkChain = WorkflowFactory('raspa.base')
+RaspaBaseWorkChain = WorkflowFactory('raspa.base')  #pylint: disable=invalid-name
 
 # Defining DataFactory and CalculationFactory
-CifData = DataFactory("cif")
-ZeoppParameters = DataFactory("zeopp.parameters")
+CifData = DataFactory("cif")  #pylint: disable=invalid-name
+ZeoppParameters = DataFactory("zeopp.parameters")  #pylint: disable=invalid-name
 
-ZeoppCalculation = CalculationFactory("zeopp.network")
+ZeoppCalculation = CalculationFactory("zeopp.network")  #pylint: disable=invalid-name
+
 
 @calcfunction
 def get_components_dict(mixture, isotparam):
@@ -57,8 +57,10 @@ def get_geometric_output(zeopp_out):
     geometric_output.update({'is_porous': geometric_output["POAV_A^3"] > 0.000})
     return Dict(dict=geometric_output)
 
+
 @calcfunction
 def get_ff_params(isotparam, components):
+    """Get RASPA ff_parameters"""
     ff_param = {
         'ff_framework': isotparam['forcefield'],
         'ff_molecules': {},
@@ -66,16 +68,16 @@ def get_ff_params(isotparam, components):
         'tailcorrections': isotparam['ff_tailcorr'],
         'mixing_rule': 'Lorentz-Berthelot'
     }
-    for key, value in components.get_dict().items():
-        ff = value['forcefield']
+    for value in components.get_dict().values():
+        ff = value['forcefield']  #pylint: disable=invalid-name
         ff_param['ff_molecules'][value['name']] = ff
     return Dict(dict=ff_param)
 
 
+#pylint: disable = too-many-branches
 @calcfunction
 def get_isotherm_output(should_run_gcmc, parameters, components, pressures, **all_raspa_out_dict):
     """ Extract Widom and GCMC results to isotherm Dict """
-
     isotherm_output = {
         'temperature': parameters['temperature'],
         'temperature_unit': 'K',
@@ -93,7 +95,8 @@ def get_isotherm_output(should_run_gcmc, parameters, components, pressures, **al
     for label in widom_labels:
         isotherm_output[label] = {}
 
-    for key, value in components.get_dict().items():
+    # for key, value in components.get_dict().items():
+    for value in components.get_dict().values():
         comp = value['name']
         widom_label = "widom_{}".format(comp)
         output_widom = all_raspa_out_dict[widom_label].get_dict()
@@ -126,7 +129,7 @@ def get_isotherm_output(should_run_gcmc, parameters, components, pressures, **al
         conv_ener = 1.0 / 120.273  # K to kJ/mol
         for i in range(len(pressures)):
             gcmc_out = all_raspa_out_dict['RaspaGCMC_{}'.format(i + 1)]["framework_1"]
-            for key, value in components.get_dict().items():
+            for value in components.get_dict().values():
                 comp = value['name']
                 conv_load = gcmc_out['components'][comp]["conversion_factor_molec_uc_to_mol_kg"]
                 for label in ['loading_absolute_average', 'loading_absolute_dev']:
@@ -196,7 +199,7 @@ class IsothermMultiCompWorkChain(WorkChain):
                    help='A dictionary of components with their corresponding mol fractions in the mixture.')
 
         # Exposing the Zeopp and RASPA inputs!
-        spec.expose_inputs(ZeoppCalculation, namespace='zeopp', include=['atomic_radii','code', 'metadata'])
+        spec.expose_inputs(ZeoppCalculation, namespace='zeopp', include=['atomic_radii', 'code', 'metadata'])
         spec.expose_inputs(RaspaBaseWorkChain, namespace='raspa_base', exclude=['raspa.structure', 'raspa.parameters'])
 
         # Workflow.
@@ -243,10 +246,7 @@ class IsothermMultiCompWorkChain(WorkChain):
 
         for key, value in self.ctx.components.get_dict().items():
             comp = value['name']
-            zeopp = value['zeopp']
-            zeopp_inputs.update(
-                {'parameters':get_zeopp_parameters(self.ctx.components, Str(key))}
-            )
+            zeopp_inputs.update({'parameters': get_zeopp_parameters(self.ctx.components, Str(key))})
             running = self.submit(ZeoppCalculation, **zeopp_inputs)
             zeopp_label = "zeopp_{}".format(comp)
             self.report("Running zeo++ block and volpo Calculation<{}>".format(running.id))
@@ -254,7 +254,7 @@ class IsothermMultiCompWorkChain(WorkChain):
 
     def inspect_zeopp_calc(self):
         """Asserts whether all widom calculations are finished ok."""
-        for key, value in self.ctx.components.get_dict().items():
+        for value in self.ctx.components.get_dict().values():
             assert self.ctx["zeopp_{}".format(value['name'])].is_finished_ok
 
     def should_run_widom(self):
@@ -262,7 +262,7 @@ class IsothermMultiCompWorkChain(WorkChain):
         self.ctx.should_run_widom = []
         self.ctx.geom = {}
         lcd_lim = self.ctx.parameters["lcd_max"]
-        for key, value in self.ctx.components.get_dict().items():
+        for value in self.ctx.components.get_dict().values():
             comp = value['name']
             zeopp_label = "zeopp_{}".format(comp)
             pld_lim = value["proberad"] * self.ctx.parameters["pld_scale"]
@@ -289,23 +289,22 @@ class IsothermMultiCompWorkChain(WorkChain):
         param = {
             "GeneralSettings": {
                 "SimulationType":
-                    "MonteCarlo",
+                "MonteCarlo",
                 "NumberOfInitializationCycles":
-                    0,
+                0,
                 "NumberOfCycles":
-                    self.ctx.parameters['raspa_widom_cycles'],
+                self.ctx.parameters['raspa_widom_cycles'],
                 "PrintPropertiesEvery":
-                    self.ctx.parameters['raspa_widom_cycles'] / self.ctx.parameters['raspa_verbosity'],
+                self.ctx.parameters['raspa_widom_cycles'] / self.ctx.parameters['raspa_verbosity'],
                 "PrintEvery":
-                    int(1e10),
+                int(1e10),
                 "RemoveAtomNumberCodeFromLabel":
-                    True,  # be careful!
+                True,  # be careful!
                 "Forcefield":
-                    "{}_{}_{}".format(self.ctx.parameters['forcefield'], ["notc",
-                                                                          "tc"][self.ctx.parameters['ff_tailcorr']],
-                                      ["trunc", "shift"][self.ctx.parameters['ff_shift']]),
+                "{}_{}_{}".format(self.ctx.parameters['forcefield'], ["notc", "tc"][self.ctx.parameters['ff_tailcorr']],
+                                  ["trunc", "shift"][self.ctx.parameters['ff_shift']]),
                 "CutOff":
-                    self.ctx.parameters['ff_cutoff'],
+                self.ctx.parameters['ff_cutoff'],
             },
             "System": {
                 "framework_1": {
@@ -330,7 +329,7 @@ class IsothermMultiCompWorkChain(WorkChain):
         self.ctx.raspa_inputs['raspa']['framework'] = {"framework_1": self.inputs.structure}
         self.ctx.raspa_inputs['raspa']['ff_parameters'] = get_ff_params(self.ctx.parameters, self.ctx.components)
 
-        for key, value in self.ctx.components.get_dict().items():
+        for value in self.ctx.components.get_dict().values():
             comp = value['name']
             zeopp_label = "zeopp_{}".format(comp)
             self.ctx.raspa_inputs['metadata']['call_link_label'] = "run_raspa_widom_" + comp
@@ -360,7 +359,7 @@ class IsothermMultiCompWorkChain(WorkChain):
 
     def inspect_widom_calc(self):
         """Asserts whether all widom calculations are finished ok."""
-        for key, value in self.ctx.components.get_dict().items():
+        for value in self.ctx.components.get_dict().values():
             assert self.ctx["widom_{}".format(value['name'])].is_finished_ok
 
     def should_run_gcmc(self):
@@ -396,7 +395,7 @@ class IsothermMultiCompWorkChain(WorkChain):
             output1 = self.ctx[widom_label_comp1].outputs.output_parameters.get_dict()
             self.ctx.kh_comp1 = output1["framework_1"]["components"][self.ctx.components.get_dict()['comp1']
                                                                      ['name']]["henry_coefficient_average"]
-            for key, value in self.ctx.components.get_dict().items():
+            for value in self.ctx.components.get_dict().values():
                 comp = value['name']
                 widom_label = "widom_{}".format(comp)
                 output = self.ctx[widom_label].outputs.output_parameters.get_dict()
@@ -415,10 +414,14 @@ class IsothermMultiCompWorkChain(WorkChain):
         param = self.ctx.raspa_param
         inp = self.ctx.raspa_inputs
         param["GeneralSettings"].update({
-            "NumberOfInitializationCycles": self.ctx.parameters['raspa_gcmc_init_cycles'],
-            "NumberOfCycles": self.ctx.parameters['raspa_gcmc_prod_cycles'],
-            "PrintPropertiesEvery": int(1e6),
-            "PrintEvery": self.ctx.parameters['raspa_gcmc_prod_cycles'] / self.ctx.parameters['raspa_verbosity']
+            "NumberOfInitializationCycles":
+            self.ctx.parameters['raspa_gcmc_init_cycles'],
+            "NumberOfCycles":
+            self.ctx.parameters['raspa_gcmc_prod_cycles'],
+            "PrintPropertiesEvery":
+            int(1e6),
+            "PrintEvery":
+            self.ctx.parameters['raspa_gcmc_prod_cycles'] / self.ctx.parameters['raspa_verbosity']
         })
         param["Component"] = {}
         param["Component"] = {item: {} for index, item in enumerate(list(self.ctx.components.get_dict()))}
@@ -429,12 +432,18 @@ class IsothermMultiCompWorkChain(WorkChain):
             bp_label = comp + "_block_file"
             param["Component"][comp] = param["Component"].pop(key)
             param["Component"][comp].update({
-                "MolFraction": value['molfraction'],
-                "TranslationProbability": 1.0,
-                "ReinsertionProbability": 1.0,
-                "SwapProbability": 2.0,
-                "IdentityChangeProbability": 2.0,
-                "NumberOfIdentityChanges": len(list(self.ctx.components.get_dict())),
+                "MolFraction":
+                value['molfraction'],
+                "TranslationProbability":
+                1.0,
+                "ReinsertionProbability":
+                1.0,
+                "SwapProbability":
+                2.0,
+                "IdentityChangeProbability":
+                2.0,
+                "NumberOfIdentityChanges":
+                len(list(self.ctx.components.get_dict())),
                 "IdentityChangesList": [i for i in range(len(list(self.ctx.components.get_dict())))]
             })
             if not value['singlebead']:
@@ -498,7 +507,7 @@ class IsothermMultiCompWorkChain(WorkChain):
 
         all_raspa_out_dict = {}
 
-        for key, value in self.ctx.components.get_dict().items():
+        for value in self.ctx.components.get_dict().values():
             widom_label = "widom_{}".format(value['name'])
             all_raspa_out_dict[widom_label] = self.ctx[widom_label].outputs.output_parameters
 
@@ -511,4 +520,6 @@ class IsothermMultiCompWorkChain(WorkChain):
                                 List(list=self.ctx.pressures), **all_raspa_out_dict))
         self.report("Isotherm @ {}K computed: isotherm Dict<{}>".format(self.ctx.temperature,
                                                                         self.outputs['isotherm_output'].pk))
+
+
 # EOF

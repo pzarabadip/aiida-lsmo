@@ -8,9 +8,9 @@ from __future__ import print_function
 import os
 import click
 
-from aiida.engine import run, submit
+from aiida.engine import run
 from aiida.plugins import DataFactory, WorkflowFactory
-from aiida.orm import Code, Dict, Str
+from aiida.orm import Code, Dict
 
 # Workchain objects
 IsothermMultiCompWorkChain = WorkflowFactory('lsmo.isotherm_multi_comp')  # pylint: disable=invalid-name
@@ -19,6 +19,7 @@ IsothermMultiCompWorkChain = WorkflowFactory('lsmo.isotherm_multi_comp')  # pyli
 CifData = DataFactory('cif')  # pylint: disable=invalid-name
 NetworkParameters = DataFactory('zeopp.parameters')  # pylint: disable=invalid-name
 SinglefileData = DataFactory('singlefile')
+
 
 @click.command('cli')
 @click.argument('raspa_code_label')
@@ -48,8 +49,14 @@ def main(raspa_code_label, zeopp_code_label):
     builder.zeopp.atomic_radii = SinglefileData(file=os.path.abspath('data/UFF.rad'))
     builder.structure = CifData(file=os.path.abspath('data/HKUST-1.cif'), label="HKUST-1")
     builder.mixture = Dict(dict={
-        'comp1':{'name':'xenon','molfraction':0.2},
-        'comp2':{'name':'krypton','molfraction':0.8}
+        'comp1': {
+            'name': 'xenon',
+            'molfraction': 0.2
+        },
+        'comp2': {
+            'name': 'krypton',
+            'molfraction': 0.8
+        }
     })
 
     builder.parameters = Dict(
