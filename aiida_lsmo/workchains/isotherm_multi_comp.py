@@ -1,13 +1,12 @@
-"""
-Smart High_Throughput Screening WorkChain
-"""
+# -*- coding: utf-8 -*-
+"""IsothermMultiTemp workchain."""
 from __future__ import absolute_import
 import os
 from six.moves import range
 
 # AiiDA modules
 from aiida.plugins import CalculationFactory, DataFactory, WorkflowFactory
-from aiida.orm import Bool, Dict, List, Str
+from aiida.orm import Bool, Dict, List, Str, SinglefileData
 from aiida.engine import calcfunction
 from aiida.engine import ToContext, WorkChain, append_, if_, while_
 from aiida_lsmo.utils import aiida_dict_merge, check_resize_unit_cell
@@ -26,8 +25,8 @@ def get_components_dict(mixture, isotparam):
     """Construct components dict"""
     import ruamel.yaml as yaml
     mixture_dict = {}
-    thisdir = '/storage/brno9-ceitec/home/pezhman/projects/git_repos/aiida-lsmo/aiida_lsmo/workchains/isotherm_data'
-    yamlfile = os.path.join(thisdir, "isotherm_molecules.yaml")
+    thisdir = os.path.dirname(os.path.abspath(__file__))
+    yamlfile = os.path.join(thisdir, "isotherm_data", "isotherm_molecules.yaml")
     with open(yamlfile, 'r') as stream:
         yaml_dict = yaml.safe_load(stream)
     for key, value in mixture.get_dict().items():
@@ -48,6 +47,15 @@ def get_components_dict(mixture, isotparam):
 def get_zeopp_parameters(components, comp):
     """Get the ZeoppParameters from the components Dict!"""
     return ZeoppParameters(dict=components[comp.value]['zeopp'])
+
+
+@calcfunction
+def get_atomic_radii(ff_param):
+    """Get {forcefield}.rad as SinglefileData form workchain/isotherm_data"""
+    forcefield = ff_param['ff_framework']
+    thisdir = os.path.dirname(os.path.abspath(__file__))
+    fullfilename = forcefield + ".rad"
+    return SinglefileData(file=os.path.join(thisdir, "isotherm_data", fullfilename))
 
 
 @calcfunction
@@ -95,7 +103,6 @@ def get_isotherm_output(should_run_gcmc, parameters, components, pressures, **al
     for label in widom_labels:
         isotherm_output[label] = {}
 
-    # for key, value in components.get_dict().items():
     for value in components.get_dict().values():
         comp = value['name']
         widom_label = "widom_{}".format(comp)
@@ -199,7 +206,7 @@ class IsothermMultiCompWorkChain(WorkChain):
                    help='A dictionary of components with their corresponding mol fractions in the mixture.')
 
         # Exposing the Zeopp and RASPA inputs!
-        spec.expose_inputs(ZeoppCalculation, namespace='zeopp', include=['atomic_radii', 'code', 'metadata'])
+        spec.expose_inputs(ZeoppCalculation, namespace='zeopp', include=['code', 'metadata'])
         spec.expose_inputs(RaspaBaseWorkChain, namespace='raspa_base', exclude=['raspa.structure', 'raspa.parameters'])
 
         # Workflow.
@@ -227,7 +234,7 @@ class IsothermMultiCompWorkChain(WorkChain):
         self.ctx.parameters = aiida_dict_merge(ISOTHERMPARAMETERS_DEFAULT, self.inputs.parameters)
         # Getting the components dict.
         self.ctx.components = get_components_dict(self.inputs.mixture, self.ctx.parameters)
-
+        self.ctx.ff_param = get_ff_params(self.ctx.parameters, self.ctx.components)
         # Get integer temperature in context for easy reports
         self.ctx.temperature = int(round(self.ctx.parameters['temperature']))
 
@@ -242,6 +249,7 @@ class IsothermMultiCompWorkChain(WorkChain):
                 'description': 'Called by IsothermMultiCompWorkChain',
             },
             'structure': self.inputs.structure,
+            'atomic_radii': get_atomic_radii(self.ctx.ff_param)
         })
 
         for key, value in self.ctx.components.get_dict().items():
@@ -327,7 +335,7 @@ class IsothermMultiCompWorkChain(WorkChain):
         self.ctx.raspa_inputs['metadata']['label'] = "RaspaWidom"
         self.ctx.raspa_inputs['metadata']['description'] = "Called by IsothermMultiCompWorkChain"
         self.ctx.raspa_inputs['raspa']['framework'] = {"framework_1": self.inputs.structure}
-        self.ctx.raspa_inputs['raspa']['ff_parameters'] = get_ff_params(self.ctx.parameters, self.ctx.components)
+        self.ctx.raspa_inputs['raspa']['ff_parameters'] = self.ctx.ff_param
 
         for value in self.ctx.components.get_dict().values():
             comp = value['name']

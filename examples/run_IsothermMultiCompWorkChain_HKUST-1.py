@@ -43,10 +43,8 @@ def main(raspa_code_label, zeopp_code_label):
         "max_wallclock_seconds": 1 * 60 * 60,
         "withmpi": False,
     }
-    # builder.raspa_base.raspa.ff_parameters = ff_parameters
     builder.raspa_base.raspa.metadata.options = options
     builder.zeopp.metadata.options = options
-    builder.zeopp.atomic_radii = SinglefileData(file=os.path.abspath('data/UFF.rad'))
     builder.structure = CifData(file=os.path.abspath('data/HKUST-1.cif'), label="HKUST-1")
     builder.mixture = Dict(dict={
         'comp1': {
